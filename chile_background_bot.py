@@ -30,21 +30,8 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from io import StringIO
 
-# Adiciona o diretório pai ao path para importar db_connection
+# Adiciona o diretório atual ao path para importar db_connection
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-# Debug - adicionar antes do try/except
-print(f"Diretório atual: {os.getcwd()}")
-print(f"Arquivos no diretório: {os.listdir('.')}")
-print(f"db_connection.py existe? {os.path.exists('db_connection.py')}")
-
-# Se existe, tenta import direto
-if os.path.exists('db_connection.py'):
-    try:
-        import db_connection
-        print("✅ Import direto funcionou")
-    except Exception as e:
-        print(f"❌ Erro no import direto: {e}")
 
 try:
     from db_connection import get_execution_history, is_railway, save_execution_result
@@ -795,34 +782,62 @@ class DroplAutomationBot:
             logger.info("=== INICIANDO AUTOMAÇÃO BACKGROUND ===")
             
             # Setup do driver
+            logger.info("PASSO 1: Configurando driver...")
             if not self.setup_driver():
                 raise Exception("Falha ao configurar o driver Chrome")
+            logger.info("✅ Driver configurado com sucesso")
             
             # Login
+            logger.info("PASSO 2: Fazendo login...")
             if not self.login():
                 raise Exception("Falha no login")
+            logger.info("✅ Login realizado com sucesso")
             
             # Navegar para novelties
+            logger.info("PASSO 3: Navegando para novelties...")
             if not self.navigate_to_novelties():
                 raise Exception("Falha ao navegar até Novelties")
+            logger.info("✅ Navegação para novelties concluída")
             
             # Configurar exibição
+            logger.info("PASSO 4: Configurando exibição de entradas...")
             if not self.configure_entries_display():
                 raise Exception("Falha ao configurar exibição de entradas")
+            logger.info(f"✅ Configuração concluída - {self.total_items} novelties encontradas")
+            
+            # Verificar se há novelties para processar
+            if self.total_items == 0:
+                logger.warning("⚠️ Nenhuma novelty encontrada para processar")
+                no_items_message = f"""⚠️ **Nenhuma novelty encontrada**
+
+Possíveis causas:
+• Todas já foram processadas
+• Página não carregou corretamente
+• Filtros ativos na tabela
+• Mudança na estrutura do site"""
+                self.send_discord_notification(no_items_message, is_error=True)
+                return
             
             # Processar novelties
-            logger.info(f"Iniciando processamento de {self.total_items} novelties...")
+            logger.info(f"PASSO 5: Iniciando processamento de {self.total_items} novelties...")
             
+            # Loop de processamento com log detalhado
             while self.current_row_index < len(self.rows):
                 try:
+                    logger.info(f"Processando novelty {self.current_row_index + 1}/{len(self.rows)}")
+                    
                     if not self.process_current_novelty():
                         # Se retornou False, continua para a próxima
+                        logger.info(f"Novelty {self.current_row_index} processada, continuando...")
                         continue
                     else:
                         # Se retornou True, todas foram processadas
+                        logger.info("Todas as novelties foram processadas")
                         break
+                        
                 except Exception as e:
                     logger.error(f"Erro ao processar novelty {self.current_row_index}: {str(e)}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
                     self.failed_items.append({
                         "id": f"Linha {self.current_row_index + 1}",
                         "error": str(e)
@@ -830,56 +845,91 @@ class DroplAutomationBot:
                     self.failed_count = len(self.failed_items)
                     self.current_row_index += 1
             
+            logger.info("PASSO 6: Processamento concluído")
+            logger.info(f"Sucessos: {self.success_count}, Falhas: {self.failed_count}")
+            
             # Gerar relatório
+            logger.info("PASSO 7: Gerando relatório...")
             self.generate_report()
             
             # Salvar no banco de dados
+            logger.info("PASSO 8: Salvando no banco de dados...")
             self.save_to_database()
             
-            # Notificação de sucesso
+            # Notificação de sucesso/conclusão
             execution_time = (datetime.datetime.now() - self.execution_start_time).total_seconds()
             
-            success_message = f"""✅ **Automação concluída com sucesso!**
+            if self.success_count > 0:
+                success_message = f"""✅ **Automação concluída!**
+
+📊 **Resultados:**
+• Processadas com sucesso: {self.success_count}
+• Falhas: {self.failed_count}
+• Total encontradas: {self.total_items}
+• Guias fechadas: {self.closed_tabs}
+• Tempo: {execution_time/60:.2f} min
+
+🔧 **Detalhes:**
+• Paginação: {'Sim' if self.found_pagination else 'Não'}
+• Screenshots: {len(os.listdir('screenshots')) if os.path.exists('screenshots') else 0}"""
+            else:
+                success_message = f"""⚠️ **Automação finalizada sem processamentos**
 
 📊 **Estatísticas:**
-• Total processado: {self.success_count}
+• Novelties encontradas: {self.total_items}
+• Processadas: {self.success_count}
 • Falhas: {self.failed_count}
-• Guias fechadas: {self.closed_tabs}
-• Tempo de execução: {execution_time/60:.2f} minutos
+• Tempo: {execution_time/60:.2f} min
 
-🔧 **Detalhes técnicos:**
-• Paginação encontrada: {'Sim' if self.found_pagination else 'Não'}
-• Screenshots salvos: {len(os.listdir('screenshots')) if os.path.exists('screenshots') else 0}"""
+❓ **Possíveis causas:**
+• Todas já processadas anteriormente
+• Erro na detecção dos botões Save
+• Mudança na estrutura do site"""
 
             if self.failed_count > 0:
-                success_message += f"\n\n⚠️ **Itens com falha:**"
-                for item in self.failed_items[:5]:  # Mostra apenas os primeiros 5
+                success_message += f"\n\n⚠️ **Falhas encontradas:**"
+                for i, item in enumerate(self.failed_items[:3]):  # Mostra apenas as primeiras 3
                     success_message += f"\n• {item['id']}: {item['error'][:50]}..."
                 
-                if len(self.failed_items) > 5:
-                    success_message += f"\n• ... e mais {len(self.failed_items) - 5} itens"
+                if len(self.failed_items) > 3:
+                    success_message += f"\n• ... e mais {len(self.failed_items) - 3} falhas"
             
-            self.send_discord_notification(success_message)
+            # Determina se é erro baseado nos resultados
+            is_error = (self.success_count == 0 and self.total_items > 0) or (self.failed_count > self.success_count)
+            self.send_discord_notification(success_message, is_error=is_error)
             
-            logger.info("=== AUTOMAÇÃO CONCLUÍDA COM SUCESSO ===")
+            logger.info("=== AUTOMAÇÃO CONCLUÍDA ===")
             
         except Exception as e:
-            logger.error(f"Erro na automação: {str(e)}")
-            logger.error(traceback.format_exc())
+            logger.error(f"ERRO CRÍTICO na automação: {str(e)}")
+            logger.error(f"Traceback completo: {traceback.format_exc()}")
             
-            # Notificação de erro
+            # Captura screenshot de erro se possível
+            try:
+                if self.driver:
+                    error_screenshot = os.path.join(self.create_screenshots_folder(), "error.png")
+                    self.driver.save_screenshot(error_screenshot)
+                    logger.info(f"Screenshot de erro salvo: {error_screenshot}")
+            except:
+                pass
+            
+            # Notificação de erro detalhada
             execution_time = (datetime.datetime.now() - self.execution_start_time).total_seconds() if self.execution_start_time else 0
             
-            error_message = f"""❌ **Automação falhou!**
+            error_message = f"""❌ **ERRO CRÍTICO na automação!**
 
-🚨 **Erro:** {str(e)[:200]}
+🚨 **Erro:** {str(e)[:300]}
 
 📊 **Progresso até o erro:**
-• Processados: {self.success_count}
+• Processadas: {self.success_count}
 • Falhas: {self.failed_count}
-• Tempo até falha: {execution_time/60:.2f} minutos
+• Encontradas: {self.total_items}
+• Tempo até falha: {execution_time/60:.2f} min
 
-🔧 **Ação necessária:** Verificar logs para detalhes completos."""
+🔧 **Para debug:**
+• Verificar logs completos
+• Verificar screenshots salvos
+• Testar acesso manual ao Dropi"""
 
             self.send_discord_notification(error_message, is_error=True)
             
@@ -887,9 +937,11 @@ class DroplAutomationBot:
             # Fecha o navegador
             if self.driver:
                 try:
+                    logger.info("Fechando navegador...")
                     self.driver.quit()
-                    logger.info("Navegador fechado")
-                except:
+                    logger.info("Navegador fechado com sucesso")
+                except Exception as e:
+                    logger.warning(f"Erro ao fechar navegador: {str(e)}")
                     pass
 
     def process_current_novelty(self):
