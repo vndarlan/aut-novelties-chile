@@ -31,7 +31,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from io import StringIO
 
 # Adiciona o diretório pai ao path para importar db_connection
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from db_connection import get_execution_history, is_railway, save_execution_result
@@ -880,7 +880,7 @@ class DroplAutomationBot:
                     pass
 
     def process_current_novelty(self):
-        """Processa a novelty atual na lista (versão simplificada para background)"""
+        """Processa a novelty atual na lista - VERSÃO CORRIGIDA"""
         try:
             # Verifica se ainda há novelties para processar
             if self.current_row_index >= len(self.rows):
@@ -904,15 +904,26 @@ class DroplAutomationBot:
                     logger.info(f"Processando novelty {row_id} ({self.current_row_index+1}/{len(fresh_rows)})")
                 else:
                     logger.warning("Não foi possível localizar a linha atual na tabela")
+                    self.failed_items.append({
+                        "id": f"Linha {self.current_row_index + 1}",
+                        "error": "Linha não encontrada na tabela"
+                    })
+                    self.failed_count = len(self.failed_items)
                     self.current_row_index += 1
                     return False
             except Exception as e:
                 logger.error(f"Erro ao recarregar linhas: {str(e)}")
+                self.failed_items.append({
+                    "id": f"Linha {self.current_row_index + 1}",
+                    "error": f"Erro ao recarregar: {str(e)}"
+                })
+                self.failed_count = len(self.failed_items)
                 self.current_row_index += 1
                 return False
             
             # Atualiza contadores
             self.processed_items = self.current_row_index + 1
+            processing_success = False  # Flag para verificar sucesso real
             
             # Clica no botão Save
             try:
@@ -924,117 +935,153 @@ class DroplAutomationBot:
                     time.sleep(1)
                     self.driver.execute_script("arguments[0].click();", save_button)
                     logger.info("Botão 'Save' clicado")
-                else:
-                    logger.warning("Botão 'Save' não encontrado")
-                    self.current_row_index += 1
-                    return False
-            except Exception as e:
-                logger.error(f"Erro ao clicar no botão 'Save': {str(e)}")
-                self.current_row_index += 1
-                return False
-            
-            # Aguarda popup
-            time.sleep(5)
-            
-            # Clica em Yes/Sim
-            yes_clicked = False
-            for text in ["Yes", "Sim", "YES", "SIM", "yes", "sim"]:
-                try:
-                    yes_buttons = self.driver.find_elements(By.XPATH, f"//button[contains(text(), '{text}')]")
-                    for button in yes_buttons:
-                        if button.is_displayed():
-                            self.driver.execute_script("arguments[0].click();", button)
-                            logger.info(f"Clicado no botão '{text}'")
-                            yes_clicked = True
-                            break
-                    if yes_clicked:
-                        break
-                except:
-                    continue
-            
-            if not yes_clicked:
-                logger.warning("Não foi possível clicar em 'Yes'/'Sim'")
-            
-            time.sleep(5)
-            
-            # Extrai informações do cliente
-            customer_info = self.extract_customer_info()
-            
-            # Analisa texto para mensagem automática
-            try:
-                page_text = self.driver.find_element(By.TAG_NAME, "body").text
-                automatic_message = self.generate_automatic_message(page_text)
-                if automatic_message:
-                    customer_info["automatic_message"] = automatic_message
-            except Exception as e:
-                logger.info(f"Erro ao analisar texto da página: {str(e)}")
-            
-            # Procura e preenche formulário (versão simplificada)
-            try:
-                # Procura pelo modal ou formulário
-                form_modal = None
-                try:
-                    form_modal = WebDriverWait(self.driver, 7).until(
-                        EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
-                    )
-                except:
+                    
+                    # Aguarda popup aparecer
+                    time.sleep(5)
+                    
+                    # Verifica se popup/modal apareceu
+                    modal_appeared = False
                     try:
-                        form_modal = self.driver.find_element(By.TAG_NAME, "body")
-                    except:
-                        pass
-                
-                if form_modal:
-                    # Preenche campos principais
-                    address_components = self.parse_chilean_address(customer_info["address"])
+                        WebDriverWait(self.driver, 10).until(
+                            EC.any_of(
+                                EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'modal')]")),
+                                EC.presence_of_element_located((By.XPATH, "//button[contains(text(), 'Yes')]")),
+                                EC.presence_of_element_located((By.XPATH, "//button[contains(text(), 'Sim')]"))
+                            )
+                        )
+                        modal_appeared = True
+                        logger.info("Modal/popup detectado com sucesso")
+                    except TimeoutException:
+                        logger.error("Modal/popup não apareceu - item pode já estar processado ou ter erro")
+                        raise Exception("Modal não apareceu após clicar Save")
                     
-                    # Lista de campos para preencher
-                    fields_to_fill = [
-                        (["Datos adicionales a la dirección", "Datos adicionales"], customer_info["address"]),
-                        (["Solución", "Solucion"], customer_info.get("automatic_message", customer_info["address"])),
-                        (["Calle"], address_components["calle"]),
-                        (["Numero", "Número"], address_components["numero"]),
-                        (["Comuna"], address_components["comuna"]),
-                        (["Region", "Región"], address_components["region"]),
-                        (["Nombre", "Nome"], customer_info["name"]),
-                        (["Celular", "Teléfono"], customer_info["phone"])
-                    ]
+                    if modal_appeared:
+                        # Clica em Yes/Sim
+                        yes_clicked = False
+                        for text in ["Yes", "Sim", "YES", "SIM", "yes", "sim"]:
+                            try:
+                                yes_buttons = self.driver.find_elements(By.XPATH, f"//button[contains(text(), '{text}')]")
+                                for button in yes_buttons:
+                                    if button.is_displayed():
+                                        self.driver.execute_script("arguments[0].click();", button)
+                                        logger.info(f"Clicado no botão '{text}'")
+                                        yes_clicked = True
+                                        break
+                                if yes_clicked:
+                                    break
+                            except:
+                                continue
+                        
+                        if not yes_clicked:
+                            raise Exception("Não foi possível clicar em 'Yes'/'Sim'")
+                        
+                        time.sleep(5)
+                        
+                        # Extrai informações do cliente
+                        customer_info = self.extract_customer_info()
+                        
+                        # Analisa texto para mensagem automática
+                        try:
+                            page_text = self.driver.find_element(By.TAG_NAME, "body").text
+                            automatic_message = self.generate_automatic_message(page_text)
+                            if automatic_message:
+                                customer_info["automatic_message"] = automatic_message
+                        except Exception as e:
+                            logger.info(f"Erro ao analisar texto da página: {str(e)}")
+                        
+                        # Procura e preenche formulário
+                        form_filled = False
+                        try:
+                            # Procura pelo modal ou formulário
+                            form_modal = None
+                            try:
+                                form_modal = WebDriverWait(self.driver, 10).until(
+                                    EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
+                                )
+                            except:
+                                try:
+                                    form_modal = self.driver.find_element(By.TAG_NAME, "body")
+                                except:
+                                    pass
+                            
+                            if form_modal:
+                                # Preenche campos principais
+                                address_components = self.parse_chilean_address(customer_info["address"])
+                                
+                                # Lista de campos para preencher
+                                fields_to_fill = [
+                                    (["Datos adicionales a la dirección", "Datos adicionales"], customer_info["address"]),
+                                    (["Solución", "Solucion"], customer_info.get("automatic_message", customer_info["address"])),
+                                    (["Calle"], address_components["calle"]),
+                                    (["Numero", "Número"], address_components["numero"]),
+                                    (["Comuna"], address_components["comuna"]),
+                                    (["Region", "Región"], address_components["region"]),
+                                    (["Nombre", "Nome"], customer_info["name"]),
+                                    (["Celular", "Teléfono"], customer_info["phone"])
+                                ]
+                                
+                                fields_filled = 0
+                                for labels, value in fields_to_fill:
+                                    if self.fill_field_by_label(form_modal, labels, value):
+                                        fields_filled += 1
+                                
+                                logger.info(f"Preenchidos {fields_filled} campos")
+                                
+                                if fields_filled > 0:
+                                    # Clica em salvar
+                                    if self.click_save_button():
+                                        form_filled = True
+                                        logger.info("Formulário salvo com sucesso")
+                                    else:
+                                        raise Exception("Falha ao salvar formulário")
+                                else:
+                                    raise Exception("Nenhum campo foi preenchido")
+                            else:
+                                raise Exception("Modal do formulário não encontrado")
+                            
+                        except Exception as e:
+                            logger.error(f"Erro ao preencher formulário: {str(e)}")
+                            raise Exception(f"Falha no formulário: {str(e)}")
+                        
+                        if form_filled:
+                            # Aguarda processamento
+                            time.sleep(5)
+                            
+                            # Clica em OK se houver popup de confirmação
+                            try:
+                                for text in ["OK", "Ok", "Aceptar", "Aceitar"]:
+                                    ok_buttons = self.driver.find_elements(By.XPATH, f"//button[contains(text(), '{text}')]")
+                                    for button in ok_buttons:
+                                        if button.is_displayed():
+                                            self.driver.execute_script("arguments[0].click();", button)
+                                            logger.info(f"Clicado no botão '{text}'")
+                                            break
+                            except:
+                                pass
+                            
+                            # Verifica e fecha guias extras
+                            self.check_and_close_tabs()
+                            
+                            # Marca como sucesso apenas se chegou até aqui
+                            processing_success = True
+                            logger.info(f"Novelty {row_id} processada com sucesso!")
+                        
+                else:
+                    raise Exception("Botão 'Save' não encontrado")
                     
-                    fields_filled = 0
-                    for labels, value in fields_to_fill:
-                        if self.fill_field_by_label(form_modal, labels, value):
-                            fields_filled += 1
-                    
-                    logger.info(f"Preenchidos {fields_filled} campos")
-                    
-                    # Clica em salvar
-                    self.click_save_button()
-                
             except Exception as e:
-                logger.warning(f"Erro ao preencher formulário: {str(e)}")
+                logger.error(f"Erro ao processar novelty: {str(e)}")
+                self.failed_items.append({
+                    "id": row_id,
+                    "error": str(e)
+                })
+                self.failed_count = len(self.failed_items)
             
-            # Aguarda processamento
-            time.sleep(5)
+            # Só incrementa success_count se realmente processou
+            if processing_success:
+                self.success_count += 1
             
-            # Clica em OK se houver popup de confirmação
-            try:
-                for text in ["OK", "Ok", "Aceptar", "Aceitar"]:
-                    ok_buttons = self.driver.find_elements(By.XPATH, f"//button[contains(text(), '{text}')]")
-                    for button in ok_buttons:
-                        if button.is_displayed():
-                            self.driver.execute_script("arguments[0].click();", button)
-                            logger.info(f"Clicado no botão '{text}'")
-                            break
-            except:
-                pass
-            
-            # Verifica e fecha guias extras
-            self.check_and_close_tabs()
-            
-            # Incrementa contador de sucesso
-            self.success_count += 1
-            logger.info(f"Novelty {row_id} processada com sucesso!")
-            
-            # Incrementa índice
+            # Incrementa índice sempre
             self.current_row_index += 1
             
             # Pausa entre processamentos
@@ -1043,7 +1090,7 @@ class DroplAutomationBot:
             return False  # Continua processando
             
         except Exception as e:
-            logger.error(f"Erro ao processar novelty: {str(e)}")
+            logger.error(f"Erro geral ao processar novelty: {str(e)}")
             self.failed_items.append({
                 "id": f"Linha {self.current_row_index + 1}",
                 "error": str(e)
