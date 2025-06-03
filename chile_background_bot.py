@@ -33,6 +33,19 @@ from io import StringIO
 # Adiciona o diretório pai ao path para importar db_connection
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# Debug - adicionar antes do try/except
+print(f"Diretório atual: {os.getcwd()}")
+print(f"Arquivos no diretório: {os.listdir('.')}")
+print(f"db_connection.py existe? {os.path.exists('db_connection.py')}")
+
+# Se existe, tenta import direto
+if os.path.exists('db_connection.py'):
+    try:
+        import db_connection
+        print("✅ Import direto funcionou")
+    except Exception as e:
+        print(f"❌ Erro no import direto: {e}")
+
 try:
     from db_connection import get_execution_history, is_railway, save_execution_result
 except ImportError:
