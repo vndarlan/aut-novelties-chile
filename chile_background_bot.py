@@ -123,18 +123,12 @@ class DroplAutomationBot:
         chrome_options.add_argument("--disable-features=VizDisplayCompositor")
         
         try:
-            if is_railway():
-                # No Railway, usa o Chrome já instalado pelo Dockerfile
-                logger.info("Inicializando o driver Chrome no Railway...")
-                service = Service()
-                self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            else:
-                # Localmente, usa o webdriver_manager
-                logger.info("Inicializando o driver Chrome localmente...")
-                self.driver = webdriver.Chrome(
-                    service=Service(ChromeDriverManager().install()),
-                    options=chrome_options
-                )
+            # Usa webdriver-manager tanto no Railway quanto localmente para máxima compatibilidade
+            logger.info("Inicializando o driver Chrome com webdriver-manager...")
+            self.driver = webdriver.Chrome(
+                service=Service(ChromeDriverManager().install()),
+                options=chrome_options
+            )
                 
             logger.info("Driver do Chrome iniciado com sucesso")
             return True
