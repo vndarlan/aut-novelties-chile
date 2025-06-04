@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Automação Dropi Chile - Background Service
-Executa a cada 6 horas de forma completamente automatizada
+VERSÃO CORRIGIDA - Dropi Chile Bot para Railway Cron Jobs
+Executa UMA VEZ e termina (para ser usado com Railway Native Cron)
 """
 
 import time
 import pandas as pd
-import schedule
 import logging
 import traceback
 import os
@@ -48,11 +47,11 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('automation.log'),
+        logging.FileHandler('automation.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger("dropi_automation_background")
+logger = logging.getLogger("dropi_automation_cron")
 
 class DroplAutomationBot:
     def __init__(self):
@@ -80,24 +79,24 @@ class DroplAutomationBot:
             
             embed = {
                 "embeds": [{
-                    "title": "🇨🇱 Automação Dropi Chile",
+                    "title": "🇨🇱 Dropi Chile Cron Job",
                     "description": message,
                     "color": color,
                     "timestamp": datetime.datetime.now().isoformat(),
                     "footer": {
-                        "text": "Railway Automation Bot"
+                        "text": "Railway Cron Automation"
                     }
                 }]
             }
             
             response = requests.post(DISCORD_WEBHOOK_URL, json=embed, timeout=10)
             if response.status_code == 204:
-                logger.info("Notificação Discord enviada com sucesso")
+                logger.info("✅ Notificação Discord enviada com sucesso")
             else:
-                logger.warning(f"Falha ao enviar notificação Discord: {response.status_code}")
+                logger.warning(f"⚠️ Falha ao enviar notificação Discord: {response.status_code}")
                 
         except Exception as e:
-            logger.error(f"Erro ao enviar notificação Discord: {str(e)}")
+            logger.error(f"❌ Erro ao enviar notificação Discord: {str(e)}")
 
     def create_screenshots_folder(self):
         """Cria pasta de screenshots se não existir"""
@@ -107,48 +106,58 @@ class DroplAutomationBot:
 
     def setup_driver(self):
         """Configura o driver do Selenium"""
-        logger.info("Iniciando configuração do driver Chrome...")
+        logger.info("🔧 Iniciando configuração do driver Chrome...")
         
         chrome_options = Options()
         
-        # Sempre usar headless em background
-        logger.info("Modo headless ativado para execução em background")
-        chrome_options.add_argument("--headless=new")
-        chrome_options.add_argument("--disable-gpu")
+        # Configura modo visual vs headless baseado no ambiente
+        if is_railway():
+            # Railway: sempre headless
+            logger.info("🎭 Modo headless ativado (Railway)")
+            chrome_options.add_argument("--headless=new")
+            chrome_options.add_argument("--disable-gpu")
+        else:
+            # Local: modo visual para debug
+            logger.info("👁️ Modo visual ativado (Local) - Chrome será aberto")
+            # Não adiciona --headless para mostrar o navegador
+        
+        # Configurações comuns
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-web-security")
         chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+        chrome_options.add_argument("--memory-pressure-off")
+        chrome_options.add_argument("--max_old_space_size=4096")
         
         try:
             if is_railway():
                 # No Railway, usa o Chrome já instalado pelo Dockerfile
-                logger.info("Inicializando o driver Chrome no Railway...")
+                logger.info("🚂 Inicializando o driver Chrome no Railway...")
                 service = Service()
                 self.driver = webdriver.Chrome(service=service, options=chrome_options)
             else:
                 # Localmente, usa o webdriver_manager
-                logger.info("Inicializando o driver Chrome localmente...")
+                logger.info("💻 Inicializando o driver Chrome localmente...")
                 self.driver = webdriver.Chrome(
                     service=Service(ChromeDriverManager().install()),
                     options=chrome_options
                 )
                 
-            logger.info("Driver do Chrome iniciado com sucesso")
+            logger.info("✅ Driver do Chrome iniciado com sucesso")
             return True
         except Exception as e:
-            logger.error(f"Erro ao configurar o driver Chrome: {str(e)}")
+            logger.error(f"❌ Erro ao configurar o driver Chrome: {str(e)}")
             logger.error(traceback.format_exc())
             return False
 
     def verify_credentials_and_urls(self):
         """Verifica se as credenciais e URLs estão corretas"""
-        logger.info("=== VERIFICAÇÃO DE CREDENCIAIS E URLS ===")
+        logger.info("🔐 Verificando credenciais e URLs...")
         
-        logger.info(f"Email: {self.email}")
-        logger.info(f"Senha: {'*' * len(self.password)}")
+        logger.info(f"📧 Email: {self.email}")
+        logger.info(f"🔑 Senha: {'*' * len(self.password)}")
         
         test_urls = [
             "https://app.dropi.cl",
@@ -160,9 +169,9 @@ class DroplAutomationBot:
             "https://admin.dropi.cl/login"
         ]
         
-        logger.info("URLs sendo testadas:")
+        logger.info("🌐 URLs sendo testadas:")
         for url in test_urls:
-            logger.info(f"  - {url}")
+            logger.info(f"  • {url}")
         
         return self.email, self.password, test_urls
 
@@ -173,22 +182,20 @@ class DroplAutomationBot:
             
             email, password, login_urls = self.verify_credentials_and_urls()
             
-            logger.info("=== INICIANDO PROCESSO DE LOGIN ===")
-            logger.info(f"Email configurado: {email}")
-            logger.info(f"Senha configurada: {'*' * len(password)}")
+            logger.info("🚀 Iniciando processo de login...")
             
             successful_url = None
             
             for url in login_urls:
                 try:
-                    logger.info(f"Tentando URL: {url}")
+                    logger.info(f"🌐 Tentando URL: {url}")
                     self.driver.get(url)
                     time.sleep(3)
                     
                     current_url = self.driver.current_url
                     page_title = self.driver.title
-                    logger.info(f"URL carregada: {current_url}")
-                    logger.info(f"Título da página: {page_title}")
+                    logger.info(f"📍 URL carregada: {current_url}")
+                    logger.info(f"📄 Título da página: {page_title}")
                     
                     if "login" in current_url.lower() or "auth" in current_url.lower():
                         successful_url = url
@@ -214,9 +221,9 @@ class DroplAutomationBot:
             try:
                 screenshot_path = os.path.join(self.create_screenshots_folder(), "login_page.png")
                 self.driver.save_screenshot(screenshot_path)
-                logger.info(f"Screenshot da página de login salvo: {screenshot_path}")
+                logger.info(f"📸 Screenshot da página de login salvo: {screenshot_path}")
             except Exception as e:
-                logger.warning(f"Não foi possível salvar screenshot: {str(e)}")
+                logger.warning(f"⚠️ Não foi possível salvar screenshot: {str(e)}")
             
             # Procura por campos de email
             email_field = None
@@ -242,7 +249,7 @@ class DroplAutomationBot:
                     if email_field:
                         break
                 except Exception as e:
-                    logger.info(f"Seletor {selector} falhou: {str(e)}")
+                    logger.debug(f"Seletor {selector} falhou: {str(e)}")
             
             if not email_field:
                 logger.error("❌ Campo de email não encontrado")
@@ -270,14 +277,14 @@ class DroplAutomationBot:
                     if password_field:
                         break
                 except Exception as e:
-                    logger.info(f"Seletor {selector} falhou: {str(e)}")
+                    logger.debug(f"Seletor {selector} falhou: {str(e)}")
             
             if not password_field:
                 logger.error("❌ Campo de senha não encontrado")
                 return False
             
             # Preenche os campos
-            logger.info("=== PREENCHENDO CAMPOS ===")
+            logger.info("✏️ Preenchendo campos de login...")
             
             try:
                 # Preenche email
@@ -304,7 +311,7 @@ class DroplAutomationBot:
                 return False
             
             # Procura e clica no botão de login
-            logger.info("=== PROCURANDO BOTÃO DE LOGIN ===")
+            logger.info("🔍 Procurando botão de login...")
             
             login_button = None
             login_selectors = [
@@ -330,14 +337,14 @@ class DroplAutomationBot:
                     if login_button:
                         break
                 except Exception as e:
-                    logger.info(f"Seletor {selector} falhou: {str(e)}")
+                    logger.debug(f"Seletor {selector} falhou: {str(e)}")
             
             if not login_button:
                 logger.error("❌ Botão de login não encontrado")
                 return False
             
             # Clica no botão de login
-            logger.info("=== TENTANDO FAZER LOGIN ===")
+            logger.info("🎯 Tentando fazer login...")
             
             try:
                 self.driver.execute_script("arguments[0].scrollIntoView(true);", login_button)
@@ -364,19 +371,19 @@ class DroplAutomationBot:
                 return False
             
             # Aguarda e verifica o resultado
-            logger.info("=== VERIFICANDO RESULTADO DO LOGIN ===")
+            logger.info("🔍 Verificando resultado do login...")
             time.sleep(8)
             
             current_url = self.driver.current_url
             page_title = self.driver.title
-            logger.info(f"URL após login: {current_url}")
-            logger.info(f"Título após login: {page_title}")
+            logger.info(f"📍 URL após login: {current_url}")
+            logger.info(f"📄 Título após login: {page_title}")
             
             # Captura screenshot após login
             try:
                 screenshot_path = os.path.join(self.create_screenshots_folder(), "after_login.png")
                 self.driver.save_screenshot(screenshot_path)
-                logger.info(f"Screenshot pós-login salvo: {screenshot_path}")
+                logger.info(f"📸 Screenshot pós-login salvo: {screenshot_path}")
             except:
                 pass
             
@@ -398,7 +405,7 @@ class DroplAutomationBot:
                 return False
             
             # Teste final: tenta navegar para o dashboard
-            logger.info("=== TESTE FINAL: NAVEGANDO PARA DASHBOARD ===")
+            logger.info("🔍 Teste final: navegando para dashboard...")
             try:
                 dashboard_urls = [
                     "https://app.dropi.cl/dashboard",
@@ -417,7 +424,7 @@ class DroplAutomationBot:
                         else:
                             logger.warning(f"❌ Redirecionado para login ao tentar acessar: {dashboard_url}")
                     except Exception as e:
-                        logger.info(f"Erro ao testar dashboard {dashboard_url}: {str(e)}")
+                        logger.debug(f"Erro ao testar dashboard {dashboard_url}: {str(e)}")
                         continue
             except Exception as e:
                 logger.error(f"Erro no teste final: {str(e)}")
@@ -449,29 +456,29 @@ class DroplAutomationBot:
     def navigate_to_novelties(self):
         """Navega até a página de novelties"""
         try:
-            logger.info("Navegando diretamente para a página de novelties...")
+            logger.info("🧭 Navegando diretamente para a página de novelties...")
             self.driver.get("https://app.dropi.cl/dashboard/novelties")
             time.sleep(5)
             
             current_url = self.driver.current_url
-            logger.info(f"URL atual após navegação: {current_url}")
+            logger.info(f"📍 URL atual após navegação: {current_url}")
             
             if not self.verify_authentication():
-                logger.error("Não está autenticado - redirecionado para página de registro/login")
+                logger.error("❌ Não está autenticado - redirecionado para página de registro/login")
                 return False
             
-            logger.info("Verificando se a tabela de novelties foi carregada...")
+            logger.info("🔍 Verificando se a tabela de novelties foi carregada...")
             try:
                 WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, "//table"))
                 )
-                logger.info("Tabela de novelties encontrada!")
+                logger.info("✅ Tabela de novelties encontrada!")
             except:
-                logger.warning("Não foi possível encontrar a tabela, mas continuando...")
+                logger.warning("⚠️ Não foi possível encontrar a tabela, mas continuando...")
             
             return True
         except Exception as e:
-            logger.error(f"Erro ao navegar até Novelties: {str(e)}")
+            logger.error(f"❌ Erro ao navegar até Novelties: {str(e)}")
             logger.error(traceback.format_exc())
             return False
 
@@ -480,17 +487,17 @@ class DroplAutomationBot:
         try:
             current_url = self.driver.current_url
             if "novelties" not in current_url:
-                logger.warning(f"Não está na página de novelties. URL atual: {current_url}")
+                logger.warning(f"⚠️ Não está na página de novelties. URL atual: {current_url}")
                 self.driver.get("https://app.dropi.cl/dashboard/novelties")
                 time.sleep(5)
             
             # Rola até o final da página
-            logger.info("Rolando até o final da página para verificar opções de exibição...")
+            logger.info("📜 Rolando até o final da página para verificar opções de exibição...")
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
             
             # Procura pelo select
-            logger.info("Procurando elemento select...")
+            logger.info("🔍 Procurando elemento select...")
             
             entries_found = False
             try:
@@ -503,33 +510,33 @@ class DroplAutomationBot:
                     select_elements = self.driver.find_elements(By.TAG_NAME, "select")
                 
                 if select_elements:
-                    logger.info(f"Elemento select encontrado: {len(select_elements)} elementos")
+                    logger.info(f"✅ Elemento select encontrado: {len(select_elements)} elementos")
                     
                     select_element = select_elements[0]
                     select = Select(select_element)
                     
                     options_text = [o.text for o in select.options]
-                    logger.info(f"Opções disponíveis no select: {options_text}")
+                    logger.info(f"📋 Opções disponíveis no select: {options_text}")
                     
                     try:
                         select.select_by_visible_text("1000")
-                        logger.info("Selecionado '1000' pelo texto visível")
+                        logger.info("✅ Selecionado '1000' pelo texto visível")
                         entries_found = True
                     except Exception as e:
-                        logger.info(f"Erro ao selecionar por texto visível: {str(e)}")
+                        logger.info(f"❌ Erro ao selecionar por texto visível: {str(e)}")
                         
                         try:
                             for i, option in enumerate(select.options):
                                 if "1000" in option.text or "1000" in option.get_attribute("value"):
                                     select.select_by_index(i)
-                                    logger.info(f"Selecionado '1000' pelo índice {i}")
+                                    logger.info(f"✅ Selecionado '1000' pelo índice {i}")
                                     entries_found = True
                                     break
                         except Exception as e:
-                            logger.info(f"Erro ao selecionar por índice: {str(e)}")
+                            logger.info(f"❌ Erro ao selecionar por índice: {str(e)}")
                     
                     if entries_found:
-                        logger.info("Configurado para exibir 1000 entradas")
+                        logger.info("🎯 Configurado para exibir 1000 entradas")
                         self.found_pagination = True
                         time.sleep(5)
                         
@@ -537,20 +544,20 @@ class DroplAutomationBot:
                             WebDriverWait(self.driver, 30).until(
                                 lambda d: len(d.find_elements(By.XPATH, "//table/tbody/tr")) > 0
                             )
-                            logger.info("Linhas da tabela carregadas com sucesso!")
+                            logger.info("✅ Linhas da tabela carregadas com sucesso!")
                         except TimeoutException:
-                            logger.warning("Timeout esperando pelas linhas da tabela")
+                            logger.warning("⏰ Timeout esperando pelas linhas da tabela")
                 else:
-                    logger.warning("Não foi possível encontrar o elemento select")
+                    logger.warning("⚠️ Não foi possível encontrar o elemento select")
             except Exception as e:
-                logger.error(f"Erro ao configurar quantidade de entradas: {str(e)}")
+                logger.error(f"❌ Erro ao configurar quantidade de entradas: {str(e)}")
             
             # Volta para o topo da página
             self.driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(1)
             
             # Obtém todas as linhas da tabela
-            logger.info("Contando linhas da tabela...")
+            logger.info("📊 Contando linhas da tabela...")
             try:
                 rows = self.driver.find_elements(By.XPATH, "//table/tbody/tr")
                 
@@ -567,28 +574,28 @@ class DroplAutomationBot:
                 
                 self.rows = rows
                 self.total_items = len(rows)
-                logger.info(f"Total de {len(rows)} novelties encontradas para processar")
+                logger.info(f"📈 Total de {len(rows)} novelties encontradas para processar")
                 
                 if len(rows) == 0:
                     try:
                         page_text = self.driver.find_element(By.TAG_NAME, "body").text
-                        logger.info(f"Texto da página: {page_text[:500]}...")
+                        logger.info(f"📄 Texto da página: {page_text[:500]}...")
                     except:
                         pass
             except Exception as e:
-                logger.error(f"Erro ao contar linhas da tabela: {str(e)}")
+                logger.error(f"❌ Erro ao contar linhas da tabela: {str(e)}")
                 self.rows = []
                 self.total_items = 0
             
             return True
         except Exception as e:
-            logger.error(f"Erro ao configurar exibição de entradas: {str(e)}")
+            logger.error(f"❌ Erro ao configurar exibição de entradas: {str(e)}")
             return False
 
     def extract_customer_info(self):
         """Extrai informações do cliente da página"""
         try:
-            logger.info("Extraindo informações do cliente...")
+            logger.info("📋 Extraindo informações do cliente...")
             
             customer_info = {
                 "address": "",
@@ -616,9 +623,9 @@ class DroplAutomationBot:
                                             customer_info["address"] = lines[i + 2]
                                         break
                         except Exception as e:
-                            logger.info(f"Erro ao extrair de ORDERS TO:: {str(e)}")
+                            logger.debug(f"Erro ao extrair de ORDERS TO:: {str(e)}")
             except Exception as e:
-                logger.info(f"Erro ao buscar ORDERS TO:: {str(e)}")
+                logger.debug(f"Erro ao buscar ORDERS TO:: {str(e)}")
             
             # Procura pelo campo de telefone
             try:
@@ -631,7 +638,7 @@ class DroplAutomationBot:
                             customer_info["phone"] = phone_parts[1].strip()
                             break
             except Exception as e:
-                logger.info(f"Erro ao buscar telefone: {str(e)}")
+                logger.debug(f"Erro ao buscar telefone: {str(e)}")
             
             # Valores padrão para campos não encontrados
             if not customer_info["name"]:
@@ -645,7 +652,7 @@ class DroplAutomationBot:
                 
             return customer_info
         except Exception as e:
-            logger.error(f"Erro ao extrair informações do cliente: {str(e)}")
+            logger.error(f"❌ Erro ao extrair informações do cliente: {str(e)}")
             return {
                 "address": "Endereço de Entrega",
                 "name": "Nome do Cliente",
@@ -655,7 +662,7 @@ class DroplAutomationBot:
     def parse_chilean_address(self, address):
         """Extrai componentes específicos de um endereço chileno"""
         try:
-            logger.info(f"Analisando endereço chileno: {address}")
+            logger.info(f"🏠 Analisando endereço chileno: {address}")
             
             components = {
                 "calle": "",
@@ -708,7 +715,7 @@ class DroplAutomationBot:
             
             return components
         except Exception as e:
-            logger.error(f"Erro ao analisar endereço chileno: {str(e)}")
+            logger.error(f"❌ Erro ao analisar endereço chileno: {str(e)}")
             return {
                 "calle": "",
                 "numero": "",
@@ -720,33 +727,33 @@ class DroplAutomationBot:
         """Gera mensagens automáticas com base no texto da incidência"""
         try:
             form_text = form_text.upper().strip()
-            logger.info(f"Analisando texto para mensagem automática: '{form_text[:100]}...'")
+            logger.info(f"🤖 Analisando texto para mensagem automática: '{form_text[:100]}...'")
             
             if any(phrase in form_text for phrase in ["CLIENTE AUSENTE", "NADIE EN CASA"]):
                 message = "Entramos en contacto con el cliente y él se disculpó y mencionó que estará en casa para recibir el producto en este próximo intento."
-                logger.info("Resposta selecionada: CLIENTE AUSENTE")
+                logger.info("✅ Resposta selecionada: CLIENTE AUSENTE")
                 return message
             
             if "PROBLEMA COBRO" in form_text:
                 message = "En llamada telefónica, el cliente afirmó que estará con dinero suficiente para comprar el producto, por favor intenten nuevamente."
-                logger.info("Resposta selecionada: PROBLEMA COBRO")
+                logger.info("✅ Resposta selecionada: PROBLEMA COBRO")
                 return message
             
             if any(phrase in form_text for phrase in ["DIRECCIÓN INCORRECTA", "DIRECCION INCORRECTA", "FALTAN DATOS", "INUBICABLE", "COMUNA ERRADA", "CAMBIO DE DOMICILIO"]):
                 message = "En llamada telefónica, el cliente rectificó sus datos para que la entrega suceda de forma más asertiva."
-                logger.info("Resposta selecionada: PROBLEMA DE ENDEREÇO")
+                logger.info("✅ Resposta selecionada: PROBLEMA DE ENDEREÇO")
                 return message
             
             if any(phrase in form_text for phrase in ["RECHAZA", "RECHAZADA"]):
                 message = "En llamada telefónica, el cliente afirma que quiere el producto y mencionó que no fue buscado por la transportadora. Por lo tanto, por favor envíen el producto hasta el cliente."
-                logger.info("Resposta selecionada: RECHAZO DE ENTREGA")
+                logger.info("✅ Resposta selecionada: RECHAZO DE ENTREGA")
                 return message
             
-            logger.warning("Nenhuma condição conhecida encontrada na incidência")
+            logger.warning("⚠️ Nenhuma condição conhecida encontrada na incidência")
             return ""
             
         except Exception as e:
-            logger.error(f"Erro ao gerar mensagem automática: {str(e)}")
+            logger.error(f"❌ Erro ao gerar mensagem automática: {str(e)}")
             return ""
 
     def check_and_close_tabs(self):
@@ -764,43 +771,45 @@ class DroplAutomationBot:
                         self.closed_tabs += 1
                 
                 self.driver.switch_to.window(current_handle)
-                logger.info(f"Fechadas {len(handles) - 1} guias extras")
+                logger.info(f"🗂️ Fechadas {len(handles) - 1} guias extras")
         except Exception as e:
-            logger.error(f"Erro ao verificar e fechar guias: {str(e)}")
+            logger.error(f"❌ Erro ao verificar e fechar guias: {str(e)}")
 
     def run_automation(self):
-        """Executa o processo completo de automação"""
+        """Executa o processo completo de automação - EXECUÇÃO ÚNICA"""
         try:
             self.execution_start_time = datetime.datetime.now()
             
             # Notificação inicial
             timezone_info = datetime.timezone(datetime.timedelta(hours=-3))  # UTC-3
             start_time_local = self.execution_start_time.replace(tzinfo=timezone_info)
-            start_message = f"🚀 Automação iniciada ({start_time_local.strftime('%H:%M')} UTC-3)"
+            start_message = f"🚀 **Cron Job iniciado** ({start_time_local.strftime('%H:%M')} UTC-3)\n\n📅 Próxima execução: em 6 horas\n🔧 Modo: Railway Native Cron"
             self.send_discord_notification(start_message)
             
-            logger.info("=== INICIANDO AUTOMAÇÃO BACKGROUND ===")
+            logger.info("=" * 50)
+            logger.info("🚀 INICIANDO AUTOMAÇÃO CRON JOB")
+            logger.info("=" * 50)
             
             # Setup do driver
-            logger.info("PASSO 1: Configurando driver...")
+            logger.info("🔧 PASSO 1: Configurando driver...")
             if not self.setup_driver():
                 raise Exception("Falha ao configurar o driver Chrome")
             logger.info("✅ Driver configurado com sucesso")
             
             # Login
-            logger.info("PASSO 2: Fazendo login...")
+            logger.info("🔐 PASSO 2: Fazendo login...")
             if not self.login():
                 raise Exception("Falha no login")
             logger.info("✅ Login realizado com sucesso")
             
             # Navegar para novelties
-            logger.info("PASSO 3: Navegando para novelties...")
+            logger.info("🧭 PASSO 3: Navegando para novelties...")
             if not self.navigate_to_novelties():
                 raise Exception("Falha ao navegar até Novelties")
             logger.info("✅ Navegação para novelties concluída")
             
             # Configurar exibição
-            logger.info("PASSO 4: Configurando exibição de entradas...")
+            logger.info("⚙️ PASSO 4: Configurando exibição de entradas...")
             if not self.configure_entries_display():
                 raise Exception("Falha ao configurar exibição de entradas")
             logger.info(f"✅ Configuração concluída - {self.total_items} novelties encontradas")
@@ -808,35 +817,39 @@ class DroplAutomationBot:
             # Verificar se há novelties para processar
             if self.total_items == 0:
                 logger.warning("⚠️ Nenhuma novelty encontrada para processar")
-                no_items_message = f"""⚠️ **Nenhuma novelty encontrada**
+                no_items_message = f"""📊 **Execução concluída - sem novelties**
 
-Possíveis causas:
+⚠️ Nenhuma novelty encontrada para processar
+
+**Possíveis causas:**
 • Todas já foram processadas
-• Página não carregou corretamente
+• Página não carregou corretamente  
 • Filtros ativos na tabela
-• Mudança na estrutura do site"""
-                self.send_discord_notification(no_items_message, is_error=True)
+• Mudança na estrutura do site
+
+🔄 **Próxima verificação:** em 6 horas"""
+                self.send_discord_notification(no_items_message, is_error=False)
                 return
             
             # Processar novelties
-            logger.info(f"PASSO 5: Iniciando processamento de {self.total_items} novelties...")
+            logger.info(f"🔄 PASSO 5: Processando {self.total_items} novelties...")
             
             # Loop de processamento com log detalhado
             while self.current_row_index < len(self.rows):
                 try:
-                    logger.info(f"Processando novelty {self.current_row_index + 1}/{len(self.rows)}")
+                    logger.info(f"📋 Processando novelty {self.current_row_index + 1}/{len(self.rows)}")
                     
                     if not self.process_current_novelty():
                         # Se retornou False, continua para a próxima
-                        logger.info(f"Novelty {self.current_row_index} processada, continuando...")
+                        logger.info(f"✅ Novelty {self.current_row_index} processada, continuando...")
                         continue
                     else:
                         # Se retornou True, todas foram processadas
-                        logger.info("Todas as novelties foram processadas")
+                        logger.info("🎯 Todas as novelties foram processadas")
                         break
                         
                 except Exception as e:
-                    logger.error(f"Erro ao processar novelty {self.current_row_index}: {str(e)}")
+                    logger.error(f"❌ Erro ao processar novelty {self.current_row_index}: {str(e)}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
                     self.failed_items.append({
                         "id": f"Linha {self.current_row_index + 1}",
@@ -845,46 +858,49 @@ Possíveis causas:
                     self.failed_count = len(self.failed_items)
                     self.current_row_index += 1
             
-            logger.info("PASSO 6: Processamento concluído")
-            logger.info(f"Sucessos: {self.success_count}, Falhas: {self.failed_count}")
+            logger.info("📊 PASSO 6: Processamento concluído")
+            logger.info(f"✅ Sucessos: {self.success_count}, ❌ Falhas: {self.failed_count}")
             
             # Gerar relatório
-            logger.info("PASSO 7: Gerando relatório...")
+            logger.info("📋 PASSO 7: Gerando relatório...")
             self.generate_report()
             
             # Salvar no banco de dados
-            logger.info("PASSO 8: Salvando no banco de dados...")
+            logger.info("💾 PASSO 8: Salvando no banco de dados...")
             self.save_to_database()
             
             # Notificação de sucesso/conclusão
             execution_time = (datetime.datetime.now() - self.execution_start_time).total_seconds()
             
             if self.success_count > 0:
-                success_message = f"""✅ **Automação concluída!**
+                success_message = f"""✅ **Cron Job concluído com sucesso!**
 
 📊 **Resultados:**
-• Processadas com sucesso: {self.success_count}
-• Falhas: {self.failed_count}
-• Total encontradas: {self.total_items}
-• Guias fechadas: {self.closed_tabs}
-• Tempo: {execution_time/60:.2f} min
+• ✅ Processadas: **{self.success_count}**
+• ❌ Falhas: **{self.failed_count}**
+• 📋 Total encontradas: **{self.total_items}**
+• 🗂️ Guias fechadas: **{self.closed_tabs}**
+• ⏱️ Tempo: **{execution_time/60:.2f} min**
 
 🔧 **Detalhes:**
-• Paginação: {'Sim' if self.found_pagination else 'Não'}
-• Screenshots: {len(os.listdir('screenshots')) if os.path.exists('screenshots') else 0}"""
+• 📄 Paginação: {'✅ Sim' if self.found_pagination else '❌ Não'}
+• 📸 Screenshots: {len(os.listdir('screenshots')) if os.path.exists('screenshots') else 0}
+• 🔄 **Próxima execução:** em 6 horas"""
             else:
-                success_message = f"""⚠️ **Automação finalizada sem processamentos**
+                success_message = f"""⚠️ **Cron Job finalizado sem processamentos**
 
 📊 **Estatísticas:**
-• Novelties encontradas: {self.total_items}
-• Processadas: {self.success_count}
-• Falhas: {self.failed_count}
-• Tempo: {execution_time/60:.2f} min
+• 📋 Novelties encontradas: **{self.total_items}**
+• ✅ Processadas: **{self.success_count}**
+• ❌ Falhas: **{self.failed_count}**
+• ⏱️ Tempo: **{execution_time/60:.2f} min**
 
 ❓ **Possíveis causas:**
 • Todas já processadas anteriormente
 • Erro na detecção dos botões Save
-• Mudança na estrutura do site"""
+• Mudança na estrutura do site
+
+🔄 **Próxima verificação:** em 6 horas"""
 
             if self.failed_count > 0:
                 success_message += f"\n\n⚠️ **Falhas encontradas:**"
@@ -898,10 +914,12 @@ Possíveis causas:
             is_error = (self.success_count == 0 and self.total_items > 0) or (self.failed_count > self.success_count)
             self.send_discord_notification(success_message, is_error=is_error)
             
-            logger.info("=== AUTOMAÇÃO CONCLUÍDA ===")
+            logger.info("=" * 50)
+            logger.info("🎯 AUTOMAÇÃO CRON JOB CONCLUÍDA")
+            logger.info("=" * 50)
             
         except Exception as e:
-            logger.error(f"ERRO CRÍTICO na automação: {str(e)}")
+            logger.error(f"❌ ERRO CRÍTICO na automação: {str(e)}")
             logger.error(f"Traceback completo: {traceback.format_exc()}")
             
             # Captura screenshot de erro se possível
@@ -909,27 +927,29 @@ Possíveis causas:
                 if self.driver:
                     error_screenshot = os.path.join(self.create_screenshots_folder(), "error.png")
                     self.driver.save_screenshot(error_screenshot)
-                    logger.info(f"Screenshot de erro salvo: {error_screenshot}")
+                    logger.info(f"📸 Screenshot de erro salvo: {error_screenshot}")
             except:
                 pass
             
             # Notificação de erro detalhada
             execution_time = (datetime.datetime.now() - self.execution_start_time).total_seconds() if self.execution_start_time else 0
             
-            error_message = f"""❌ **ERRO CRÍTICO na automação!**
+            error_message = f"""❌ **ERRO CRÍTICO no Cron Job!**
 
 🚨 **Erro:** {str(e)[:300]}
 
 📊 **Progresso até o erro:**
-• Processadas: {self.success_count}
-• Falhas: {self.failed_count}
-• Encontradas: {self.total_items}
-• Tempo até falha: {execution_time/60:.2f} min
+• ✅ Processadas: {self.success_count}
+• ❌ Falhas: {self.failed_count}
+• 📋 Encontradas: {self.total_items}
+• ⏱️ Tempo até falha: {execution_time/60:.2f} min
 
 🔧 **Para debug:**
-• Verificar logs completos
+• Verificar logs completos no Railway
 • Verificar screenshots salvos
-• Testar acesso manual ao Dropi"""
+• Testar acesso manual ao Dropi
+
+🔄 **Próxima tentativa:** em 6 horas"""
 
             self.send_discord_notification(error_message, is_error=True)
             
@@ -937,19 +957,22 @@ Possíveis causas:
             # Fecha o navegador
             if self.driver:
                 try:
-                    logger.info("Fechando navegador...")
+                    logger.info("🔒 Fechando navegador...")
                     self.driver.quit()
-                    logger.info("Navegador fechado com sucesso")
+                    logger.info("✅ Navegador fechado com sucesso")
                 except Exception as e:
-                    logger.warning(f"Erro ao fechar navegador: {str(e)}")
-                    pass
+                    logger.warning(f"⚠️ Erro ao fechar navegador: {str(e)}")
+            
+            # IMPORTANTE: Termina o processo para permitir próxima execução
+            logger.info("🏁 Terminando processo...")
+            sys.exit(0)
 
     def process_current_novelty(self):
-        """Processa a novelty atual na lista - VERSÃO CORRIGIDA"""
+        """Processa a novelty atual na lista"""
         try:
             # Verifica se ainda há novelties para processar
             if self.current_row_index >= len(self.rows):
-                logger.info("Todas as novelties foram processadas")
+                logger.info("🎯 Todas as novelties foram processadas")
                 return True
             
             # Recarrega as linhas para evitar StaleElementReference
@@ -966,9 +989,9 @@ Possíveis causas:
                     except:
                         pass
                     
-                    logger.info(f"Processando novelty {row_id} ({self.current_row_index+1}/{len(fresh_rows)})")
+                    logger.info(f"🔄 Processando novelty {row_id} ({self.current_row_index+1}/{len(fresh_rows)})")
                 else:
-                    logger.warning("Não foi possível localizar a linha atual na tabela")
+                    logger.warning("⚠️ Não foi possível localizar a linha atual na tabela")
                     self.failed_items.append({
                         "id": f"Linha {self.current_row_index + 1}",
                         "error": "Linha não encontrada na tabela"
@@ -977,7 +1000,7 @@ Possíveis causas:
                     self.current_row_index += 1
                     return False
             except Exception as e:
-                logger.error(f"Erro ao recarregar linhas: {str(e)}")
+                logger.error(f"❌ Erro ao recarregar linhas: {str(e)}")
                 self.failed_items.append({
                     "id": f"Linha {self.current_row_index + 1}",
                     "error": f"Erro ao recarregar: {str(e)}"
@@ -999,7 +1022,7 @@ Possíveis causas:
                     self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_button)
                     time.sleep(1)
                     self.driver.execute_script("arguments[0].click();", save_button)
-                    logger.info("Botão 'Save' clicado")
+                    logger.info("✅ Botão 'Save' clicado")
                     
                     # Aguarda popup aparecer
                     time.sleep(5)
@@ -1015,9 +1038,9 @@ Possíveis causas:
                             )
                         )
                         modal_appeared = True
-                        logger.info("Modal/popup detectado com sucesso")
+                        logger.info("✅ Modal/popup detectado com sucesso")
                     except TimeoutException:
-                        logger.error("Modal/popup não apareceu - item pode já estar processado ou ter erro")
+                        logger.error("❌ Modal/popup não apareceu - item pode já estar processado")
                         raise Exception("Modal não apareceu após clicar Save")
                     
                     if modal_appeared:
@@ -1029,7 +1052,7 @@ Possíveis causas:
                                 for button in yes_buttons:
                                     if button.is_displayed():
                                         self.driver.execute_script("arguments[0].click();", button)
-                                        logger.info(f"Clicado no botão '{text}'")
+                                        logger.info(f"✅ Clicado no botão '{text}'")
                                         yes_clicked = True
                                         break
                                 if yes_clicked:
@@ -1052,7 +1075,7 @@ Possíveis causas:
                             if automatic_message:
                                 customer_info["automatic_message"] = automatic_message
                         except Exception as e:
-                            logger.info(f"Erro ao analisar texto da página: {str(e)}")
+                            logger.debug(f"Erro ao analisar texto da página: {str(e)}")
                         
                         # Procura e preenche formulário
                         form_filled = False
@@ -1090,13 +1113,13 @@ Possíveis causas:
                                     if self.fill_field_by_label(form_modal, labels, value):
                                         fields_filled += 1
                                 
-                                logger.info(f"Preenchidos {fields_filled} campos")
+                                logger.info(f"✏️ Preenchidos {fields_filled} campos")
                                 
                                 if fields_filled > 0:
                                     # Clica em salvar
                                     if self.click_save_button():
                                         form_filled = True
-                                        logger.info("Formulário salvo com sucesso")
+                                        logger.info("✅ Formulário salvo com sucesso")
                                     else:
                                         raise Exception("Falha ao salvar formulário")
                                 else:
@@ -1105,7 +1128,7 @@ Possíveis causas:
                                 raise Exception("Modal do formulário não encontrado")
                             
                         except Exception as e:
-                            logger.error(f"Erro ao preencher formulário: {str(e)}")
+                            logger.error(f"❌ Erro ao preencher formulário: {str(e)}")
                             raise Exception(f"Falha no formulário: {str(e)}")
                         
                         if form_filled:
@@ -1136,7 +1159,7 @@ Possíveis causas:
                                     logger.warning("⚠️ Nenhuma confirmação de sucesso encontrada")
                                     
                             except Exception as e:
-                                logger.warning(f"Erro ao verificar confirmação: {str(e)}")
+                                logger.warning(f"⚠️ Erro ao verificar confirmação: {str(e)}")
                             
                             # Clica em OK/Aceptar se houver popup de confirmação
                             ok_clicked = False
@@ -1153,7 +1176,7 @@ Possíveis causas:
                                     if ok_clicked:
                                         break
                             except Exception as e:
-                                logger.warning(f"Erro ao clicar em confirmação: {str(e)}")
+                                logger.warning(f"⚠️ Erro ao clicar em confirmação: {str(e)}")
                             
                             # Aguarda mais tempo para garantir salvamento
                             time.sleep(5)
@@ -1185,7 +1208,7 @@ Possíveis causas:
                     raise Exception("Botão 'Save' não encontrado")
                     
             except Exception as e:
-                logger.error(f"Erro ao processar novelty: {str(e)}")
+                logger.error(f"❌ Erro ao processar novelty: {str(e)}")
                 self.failed_items.append({
                     "id": row_id,
                     "error": str(e)
@@ -1205,7 +1228,7 @@ Possíveis causas:
             return False  # Continua processando
             
         except Exception as e:
-            logger.error(f"Erro geral ao processar novelty: {str(e)}")
+            logger.error(f"❌ Erro geral ao processar novelty: {str(e)}")
             self.failed_items.append({
                 "id": f"Linha {self.current_row_index + 1}",
                 "error": str(e)
@@ -1215,7 +1238,7 @@ Possíveis causas:
             return False
 
     def fill_field_by_label(self, form_modal, label_texts, value):
-        """Preenche um campo específico do formulário (versão simplificada)"""
+        """Preenche um campo específico do formulário"""
         try:
             for label_text in label_texts:
                 try:
@@ -1244,7 +1267,7 @@ Possíveis causas:
                                     for event in ["input", "change", "blur"]:
                                         self.driver.execute_script(f"arguments[0].dispatchEvent(new Event('{event}'));", input_field)
                                     
-                                    logger.info(f"Campo '{label_text}' preenchido com sucesso")
+                                    logger.info(f"✅ Campo '{label_text}' preenchido com sucesso")
                                     return True
                         except Exception as e:
                             continue
@@ -1253,13 +1276,13 @@ Possíveis causas:
             
             return False
         except Exception as e:
-            logger.error(f"Erro ao preencher campo: {str(e)}")
+            logger.error(f"❌ Erro ao preencher campo: {str(e)}")
             return False
 
     def click_save_button(self):
-        """Clica no botão de salvar (versão simplificada)"""
+        """Clica no botão de salvar"""
         try:
-            logger.info("Tentando clicar no botão de salvar...")
+            logger.info("💾 Tentando clicar no botão de salvar...")
             time.sleep(3)
             
             # Procura por botões de salvar
@@ -1276,7 +1299,7 @@ Possíveis causas:
                             self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
                             time.sleep(1)
                             self.driver.execute_script("arguments[0].click();", button)
-                            logger.info(f"Clicado no botão '{pattern}'")
+                            logger.info(f"✅ Clicado no botão '{pattern}'")
                             time.sleep(2)
                             return True
                         except:
@@ -1286,14 +1309,14 @@ Possíveis causas:
             try:
                 active_element = self.driver.switch_to.active_element
                 active_element.send_keys(Keys.ENTER)
-                logger.info("Tecla Enter enviada")
+                logger.info("✅ Tecla Enter enviada")
                 return True
             except:
                 pass
             
             return False
         except Exception as e:
-            logger.error(f"Erro ao clicar no botão de salvar: {str(e)}")
+            logger.error(f"❌ Erro ao clicar no botão de salvar: {str(e)}")
             return False
 
     def generate_report(self):
@@ -1306,18 +1329,20 @@ Possíveis causas:
             "encontrou_paginacao": self.found_pagination
         }
         
-        logger.info("======= RELATÓRIO DE EXECUÇÃO =======")
-        logger.info(f"Total de novelties processadas com sucesso: {report['total_processados']}")
-        logger.info(f"Total de novelties com falha: {report['total_falhas']}")
-        logger.info(f"Total de guias fechadas: {report['guias_fechadas']}")
-        logger.info(f"Encontrou paginação: {'Sim' if report['encontrou_paginacao'] else 'Não'}")
+        logger.info("=" * 50)
+        logger.info("📋 RELATÓRIO DE EXECUÇÃO")
+        logger.info("=" * 50)
+        logger.info(f"✅ Total de novelties processadas com sucesso: {report['total_processados']}")
+        logger.info(f"❌ Total de novelties com falha: {report['total_falhas']}")
+        logger.info(f"🗂️ Total de guias fechadas: {report['guias_fechadas']}")
+        logger.info(f"📄 Encontrou paginação: {'Sim' if report['encontrou_paginacao'] else 'Não'}")
         
         if report['total_falhas'] > 0:
-            logger.info("Detalhes dos itens com falha:")
+            logger.info("❌ Detalhes dos itens com falha:")
             for item in report['itens_com_falha']:
-                logger.info(f"  - ID: {item['id']}, Erro: {item['error']}")
+                logger.info(f"  • ID: {item['id']}, Erro: {item['error']}")
         
-        logger.info("=====================================")
+        logger.info("=" * 50)
         
         return report
 
@@ -1334,43 +1359,18 @@ Possíveis causas:
                 execution_time=execution_time
             )
             
-            logger.info("Resultados salvos no banco de dados com sucesso")
+            logger.info("💾 Resultados salvos no banco de dados com sucesso")
         except Exception as e:
-            logger.error(f"Erro ao salvar no banco de dados: {str(e)}")
-
-def run_scheduled_automation():
-    """Função para executar a automação agendada"""
-    logger.info("=== INICIANDO EXECUÇÃO AGENDADA ===")
-    
-    bot = DroplAutomationBot()
-    bot.run_automation()
-    
-    logger.info("=== EXECUÇÃO AGENDADA FINALIZADA ===")
-
-def setup_scheduler():
-    """Configura o agendamento para executar a cada 6 horas"""
-    logger.info("Configurando agendamento para execução a cada 6 horas...")
-    
-    # Agenda para executar a cada 6 horas
-    schedule.every(6).hours.do(run_scheduled_automation)
-    
-    logger.info("Agendamento configurado com sucesso!")
-    logger.info("Próximas execuções:")
-    
-    # Mostra as próximas 3 execuções
-    import schedule
-    jobs = schedule.get_jobs()
-    if jobs:
-        for i in range(3):
-            next_run = jobs[0].next_run
-            if next_run:
-                logger.info(f"  {i+1}. {next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.error(f"❌ Erro ao salvar no banco de dados: {str(e)}")
 
 def main():
-    """Função principal"""
-    logger.info("=== INICIANDO DROPI CHILE BACKGROUND BOT ===")
-    logger.info(f"Ambiente: {'Railway' if is_railway() else 'Local'}")
-    logger.info(f"Data/Hora: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    """Função principal - EXECUÇÃO ÚNICA PARA CRON"""
+    logger.info("=" * 60)
+    logger.info("🚀 INICIANDO DROPI CHILE CRON JOB")
+    logger.info("=" * 60)
+    logger.info(f"🌍 Ambiente: {'Railway' if is_railway() else 'Local'}")
+    logger.info(f"📅 Data/Hora: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"🕐 Timezone: UTC (Railway) / Execução via Cron nativo")
     
     # Verifica se está pausado
     if os.getenv("BOT_PAUSED", "").lower() in ["true", "1", "yes"]:
@@ -1379,26 +1379,24 @@ def main():
         return
     
     try:
-        # Executa uma vez imediatamente para teste
-        logger.info("Executando automação imediatamente para teste...")
-        run_scheduled_automation()
+        # Executa automação UMA VEZ e termina
+        logger.info("🎯 Executando automação única (Cron Job)...")
         
-        # Configura o agendador
-        setup_scheduler()
+        bot = DroplAutomationBot()
+        bot.run_automation()
         
-        # Loop principal
-        logger.info("Entrando no loop principal do agendador...")
-        while True:
-            schedule.run_pending()
-            time.sleep(60)  # Verifica a cada minuto
-            
+        logger.info("✅ Cron Job finalizado com sucesso")
+        
     except KeyboardInterrupt:
-        logger.info("Interrompido pelo usuário")
+        logger.info("⚠️ Interrompido pelo usuário")
     except Exception as e:
-        logger.error(f"Erro no processo principal: {str(e)}")
+        logger.error(f"❌ Erro no processo principal: {str(e)}")
         logger.error(traceback.format_exc())
     finally:
-        logger.info("=== DROPI CHILE BACKGROUND BOT FINALIZADO ===")
+        logger.info("=" * 60)
+        logger.info("🏁 DROPI CHILE CRON JOB FINALIZADO")
+        logger.info("🔄 Próxima execução: automática via Railway Cron")
+        logger.info("=" * 60)
 
 if __name__ == "__main__":
     main()
