@@ -41,7 +41,7 @@ except ImportError:
 
 # Constantes
 THIS_COUNTRY = "chile"
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1379273630290284606/h1I670CtBauZ0J7_Oq2K5pPJOIZEAHkfI_9-gexG4jmMI0g5bMxRODt85BEcMyX_vkN_"
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1379593028939022387/UFkNh9u7ArClfKCVdl-Id4CoQQfCHRUP3qZsW24uHlWW4LUtmKAx97q8hpDwXRMrqDki"
 
 # Configuração de logging
 logging.basicConfig(
@@ -80,12 +80,12 @@ class DroplAutomationBot:
             
             embed = {
                 "embeds": [{
-                    "title": "🇨🇱 Automação Dropi Chile",
+                    "title": "🇨🇱 Novelties Chile",
                     "description": message,
                     "color": color,
                     "timestamp": datetime.datetime.now().isoformat(),
                     "footer": {
-                        "text": "Railway Automation Bot"
+                        "text": "Dropi Bot"
                     }
                 }]
             }
@@ -774,9 +774,7 @@ class DroplAutomationBot:
             self.execution_start_time = datetime.datetime.now()
             
             # Notificação inicial
-            timezone_info = datetime.timezone(datetime.timedelta(hours=-3))  # UTC-3
-            start_time_local = self.execution_start_time.replace(tzinfo=timezone_info)
-            start_message = f"🚀 Automação iniciada ({start_time_local.strftime('%H:%M')} UTC-3)"
+            start_message = f"🚀 Automação iniciada"
             self.send_discord_notification(start_message)
             
             logger.info("=== INICIANDO AUTOMAÇÃO BACKGROUND ===")
