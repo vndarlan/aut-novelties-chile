@@ -491,6 +491,27 @@ class DroplAutomationBot:
                 self.driver.get("https://app.dropi.cl/dashboard/novelties")
                 time.sleep(5)
             
+            # Aguarda a página carregar completamente (especialmente importante localmente)
+            logger.info("⏳ Aguardando página carregar completamente...")
+            
+            # Aguarda o elemento "Loading..." desaparecer
+            try:
+                WebDriverWait(self.driver, 30).until_not(
+                    EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Loading ...")
+                )
+                logger.info("✅ Loading concluído")
+            except TimeoutException:
+                logger.warning("⚠️ Timeout esperando loading, mas continuando...")
+            
+            # Aguarda tabela aparecer
+            try:
+                WebDriverWait(self.driver, 20).until(
+                    EC.presence_of_element_located((By.XPATH, "//table"))
+                )
+                logger.info("✅ Tabela detectada")
+            except TimeoutException:
+                logger.warning("⚠️ Tabela não detectada ainda, tentando localizar...")
+            
             # Rola até o final da página
             logger.info("📜 Rolando até o final da página para verificar opções de exibição...")
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -538,7 +559,7 @@ class DroplAutomationBot:
                     if entries_found:
                         logger.info("🎯 Configurado para exibir 1000 entradas")
                         self.found_pagination = True
-                        time.sleep(5)
+                        time.sleep(8)  # Aguarda mais tempo para recarregar
                         
                         try:
                             WebDriverWait(self.driver, 30).until(
@@ -554,38 +575,66 @@ class DroplAutomationBot:
             
             # Volta para o topo da página
             self.driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(1)
+            time.sleep(2)
             
-            # Obtém todas as linhas da tabela
+            # Obtém todas as linhas da tabela com múltiplas tentativas
             logger.info("📊 Contando linhas da tabela...")
-            try:
-                rows = self.driver.find_elements(By.XPATH, "//table/tbody/tr")
-                
-                if not rows:
-                    rows = self.driver.find_elements(By.XPATH, "//table//tr[position() > 1]")
-                
-                if not rows:
-                    rows = self.driver.find_elements(By.CSS_SELECTOR, "table tr:not(:first-child)")
-                
-                if not rows:
-                    rows = self.driver.find_elements(By.TAG_NAME, "tr")
-                    if len(rows) > 1:
-                        rows = rows[1:]
-                
-                self.rows = rows
-                self.total_items = len(rows)
-                logger.info(f"📈 Total de {len(rows)} novelties encontradas para processar")
-                
-                if len(rows) == 0:
+            for tentativa in range(3):
+                try:
+                    # Aguarda um pouco mais a cada tentativa
+                    if tentativa > 0:
+                        logger.info(f"🔄 Tentativa {tentativa + 1} de localizar linhas...")
+                        time.sleep(5)
+                    
+                    # Múltiplos seletores para localizar as linhas
+                    rows_selectors = [
+                        "//table/tbody/tr[td]",  # Linhas com células
+                        "//table/tbody/tr",
+                        "//table//tr[position() > 1]",
+                        "//table//tr[contains(@class, 'row')]",
+                        "//table tr:not(:first-child)"
+                    ]
+                    
+                    rows = []
+                    for selector in rows_selectors:
+                        try:
+                            found_rows = self.driver.find_elements(By.XPATH, selector)
+                            if found_rows:
+                                rows = found_rows
+                                logger.info(f"✅ Linhas encontradas com seletor: {selector}")
+                                break
+                        except:
+                            continue
+                    
+                    if rows:
+                        break
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Tentativa {tentativa + 1} falhou: {str(e)}")
+                    if tentativa < 2:
+                        continue
+                    else:
+                        rows = []
+            
+            self.rows = rows
+            self.total_items = len(rows)
+            logger.info(f"📈 Total de {len(rows)} novelties encontradas para processar")
+            
+            if len(rows) == 0:
+                try:
+                    page_text = self.driver.find_element(By.TAG_NAME, "body").text
+                    logger.info(f"📄 Texto da página: {page_text[:800]}...")
+                    
+                    # Captura screenshot para debug quando não encontra linhas
                     try:
-                        page_text = self.driver.find_element(By.TAG_NAME, "body").text
-                        logger.info(f"📄 Texto da página: {page_text[:500]}...")
+                        screenshot_path = os.path.join(self.create_screenshots_folder(), "no_rows_found.png")
+                        self.driver.save_screenshot(screenshot_path)
+                        logger.info(f"📸 Screenshot salvo para debug: {screenshot_path}")
                     except:
                         pass
-            except Exception as e:
-                logger.error(f"❌ Erro ao contar linhas da tabela: {str(e)}")
-                self.rows = []
-                self.total_items = 0
+                        
+                except:
+                    pass
             
             return True
         except Exception as e:
@@ -1376,7 +1425,7 @@ def main():
     if os.getenv("BOT_PAUSED", "").lower() in ["true", "1", "yes"]:
         logger.info("🛑 BOT PAUSADO - Variável BOT_PAUSED detectada")
         logger.info("Para reativar: remova a variável BOT_PAUSED ou mude para 'false'")
-        return
+        sys.exit(0)
     
     try:
         # Executa automação UMA VEZ e termina
@@ -1389,14 +1438,17 @@ def main():
         
     except KeyboardInterrupt:
         logger.info("⚠️ Interrompido pelo usuário")
+        sys.exit(0)
     except Exception as e:
         logger.error(f"❌ Erro no processo principal: {str(e)}")
         logger.error(traceback.format_exc())
+        sys.exit(1)
     finally:
         logger.info("=" * 60)
         logger.info("🏁 DROPI CHILE CRON JOB FINALIZADO")
         logger.info("🔄 Próxima execução: automática via Railway Cron")
         logger.info("=" * 60)
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
