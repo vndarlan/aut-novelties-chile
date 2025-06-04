@@ -41,7 +41,7 @@ except ImportError:
 
 # Constantes
 THIS_COUNTRY = "chile"
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1379593028939022387/UFkNh9u7ArClfKCVdl-Id4CoQQfCHRUP3qZsW24uHlWW4LUtmKAx97q8hpDwXRMrqDki"
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1379273630290284606/h1I670CtBauZ0J7_Oq2K5pPJOIZEAHkfI_9-gexG4jmMI0g5bMxRODt85BEcMyX_vkN_"
 
 # Configuração de logging
 logging.basicConfig(
@@ -80,12 +80,12 @@ class DroplAutomationBot:
             
             embed = {
                 "embeds": [{
-                    "title": "🇨🇱 Novelties Chile",
+                    "title": "🇨🇱 Automação Dropi Chile",
                     "description": message,
                     "color": color,
                     "timestamp": datetime.datetime.now().isoformat(),
                     "footer": {
-                        "text": "Dropi Bot"
+                        "text": "Railway Automation Bot"
                     }
                 }]
             }
@@ -774,7 +774,9 @@ class DroplAutomationBot:
             self.execution_start_time = datetime.datetime.now()
             
             # Notificação inicial
-            start_message = f"🚀 Automação iniciada"
+            timezone_info = datetime.timezone(datetime.timedelta(hours=-3))  # UTC-3
+            start_time_local = self.execution_start_time.replace(tzinfo=timezone_info)
+            start_message = f"🚀 Automação iniciada ({start_time_local.strftime('%H:%M')} UTC-3)"
             self.send_discord_notification(start_message)
             
             logger.info("=== INICIANDO AUTOMAÇÃO BACKGROUND ===")
@@ -1107,27 +1109,77 @@ Possíveis causas:
                             raise Exception(f"Falha no formulário: {str(e)}")
                         
                         if form_filled:
-                            # Aguarda processamento
-                            time.sleep(5)
+                            # Aguarda processamento inicial
+                            time.sleep(8)
                             
-                            # Clica em OK se houver popup de confirmação
+                            # Procura por popup de confirmação/sucesso
+                            confirmation_found = False
                             try:
-                                for text in ["OK", "Ok", "Aceptar", "Aceitar"]:
+                                # Procura por indicadores de sucesso
+                                success_indicators = [
+                                    "//div[contains(text(), 'Success')]",
+                                    "//div[contains(text(), 'Éxito')]", 
+                                    "//div[contains(text(), 'Guardado')]",
+                                    "//div[contains(text(), 'Saved')]",
+                                    "//*[contains(@class, 'alert-success')]",
+                                    "//*[contains(@class, 'success')]"
+                                ]
+                                
+                                for indicator in success_indicators:
+                                    elements = self.driver.find_elements(By.XPATH, indicator)
+                                    if elements:
+                                        confirmation_found = True
+                                        logger.info(f"✅ Confirmação de sucesso encontrada: {indicator}")
+                                        break
+                                
+                                if not confirmation_found:
+                                    logger.warning("⚠️ Nenhuma confirmação de sucesso encontrada")
+                                    
+                            except Exception as e:
+                                logger.warning(f"Erro ao verificar confirmação: {str(e)}")
+                            
+                            # Clica em OK/Aceptar se houver popup de confirmação
+                            ok_clicked = False
+                            try:
+                                for text in ["OK", "Ok", "ACEPTAR", "Aceptar", "CERRAR", "Cerrar", "CLOSE", "Close"]:
                                     ok_buttons = self.driver.find_elements(By.XPATH, f"//button[contains(text(), '{text}')]")
                                     for button in ok_buttons:
                                         if button.is_displayed():
                                             self.driver.execute_script("arguments[0].click();", button)
-                                            logger.info(f"Clicado no botão '{text}'")
+                                            logger.info(f"✅ Clicado no botão de confirmação '{text}'")
+                                            ok_clicked = True
+                                            time.sleep(3)
                                             break
+                                    if ok_clicked:
+                                        break
+                            except Exception as e:
+                                logger.warning(f"Erro ao clicar em confirmação: {str(e)}")
+                            
+                            # Aguarda mais tempo para garantir salvamento
+                            time.sleep(5)
+                            
+                            # Verifica se ainda está no modal (indica que não salvou)
+                            still_in_modal = False
+                            try:
+                                modal_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'modal') and contains(@style, 'display: block')]")
+                                if modal_elements:
+                                    still_in_modal = True
+                                    logger.warning("⚠️ Ainda está no modal - pode não ter salvado")
+                                else:
+                                    logger.info("✅ Modal fechado - provável sucesso")
                             except:
                                 pass
                             
                             # Verifica e fecha guias extras
                             self.check_and_close_tabs()
                             
-                            # Marca como sucesso apenas se chegou até aqui
-                            processing_success = True
-                            logger.info(f"Novelty {row_id} processada com sucesso!")
+                            # Marca como sucesso só se tiver confirmação ou modal fechou
+                            if confirmation_found or not still_in_modal:
+                                processing_success = True
+                                logger.info(f"✅ Novelty {row_id} CONFIRMADAMENTE processada!")
+                            else:
+                                logger.error(f"❌ Novelty {row_id} pode não ter sido salva - falta confirmação")
+                                raise Exception("Falta confirmação de salvamento")
                         
                 else:
                     raise Exception("Botão 'Save' não encontrado")
@@ -1319,6 +1371,12 @@ def main():
     logger.info("=== INICIANDO DROPI CHILE BACKGROUND BOT ===")
     logger.info(f"Ambiente: {'Railway' if is_railway() else 'Local'}")
     logger.info(f"Data/Hora: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Verifica se está pausado
+    if os.getenv("BOT_PAUSED", "").lower() in ["true", "1", "yes"]:
+        logger.info("🛑 BOT PAUSADO - Variável BOT_PAUSED detectada")
+        logger.info("Para reativar: remova a variável BOT_PAUSED ou mude para 'false'")
+        return
     
     try:
         # Executa uma vez imediatamente para teste
