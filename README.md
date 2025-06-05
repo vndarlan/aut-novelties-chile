@@ -1,251 +1,158 @@
-# 🇨🇱 Dropi Chile - Automação Background
+# 🇨🇱 Dropi Chile - Automação Railway Cron
 
-Sistema de automação completamente redesenhado para rodar **100% em background** no Railway, executando a cada **6 horas** automaticamente.
+Sistema de automação para processamento de novelties do Dropi Chile usando **Railway Native Cron Jobs**.
 
-## 🚀 Características Principais
+## 🚀 Características
 
-- ✅ **Execução Automática**: Roda a cada 6 horas sem intervenção
-- ✅ **100% Background**: Sem interface web, totalmente headless
-- ✅ **Notificações Discord**: Status de início, fim e erros
-- ✅ **Persistência**: Mantém logs no PostgreSQL existente
-- ✅ **Monitoramento**: Script de health check integrado
-- ✅ **Recovery**: Sistema robusto de recuperação de erros
+- ✅ **Railway Native Cron**: Execução a cada 6 horas via cron nativo
+- ✅ **Modo Visual Local**: Chrome visível para debug local
+- ✅ **Headless Railway**: Execução otimizada em produção
+- ✅ **Notificações Discord**: Status completo de cada execução
+- ✅ **Banco PostgreSQL**: Histórico persistente de execuções
+- ✅ **Loading Detection**: Aguarda página carregar completamente
+- ✅ **Recovery Automático**: Processa novelties em múltiplas execuções
 
-## 📁 Estrutura dos Arquivos
+## 📁 Estrutura
 
 ```
 projeto/
-├── chile_background_bot.py     # Bot principal
-├── db_connection.py           # Conexão com PostgreSQL (existente)
-├── requirements.txt           # Dependências Python
-├── Dockerfile                 # Container para Railway
-├── monitor.py                 # Script de monitoramento
-└── README.md                  # Este arquivo
+├── chile_background_bot.py     # Bot principal (execução única)
+├── db_connection.py           # Conexão PostgreSQL
+├── monitor.py                 # Health check
+├── Dockerfile                # Container Railway
+├── requirements.txt           # Dependências
+└── README.md                  # Documentação
 ```
 
-## 🔧 Deploy no Railway
+## 🔧 Setup Railway
 
-### 1. Preparação do Código
+### 1. Configurar Cron Schedule
+1. **Railway Dashboard** → **Projeto** → **Settings**
+2. **Cron Schedule**: `0 */6 * * *`
+3. **Start Command**: `python chile_background_bot.py`
 
-```bash
-# Clone ou atualize o repositório
-git clone [seu-repo]
-cd [seu-projeto]
-
-# Substitua o arquivo chile.py pelo chile_background_bot.py
-mv chile.py chile_old.py  # backup
-cp chile_background_bot.py chile_background_bot.py
-
-# Atualize requirements.txt
-cp requirements.txt requirements.txt
-```
-
-### 2. Configuração no Railway
-
-1. **Acesse o Railway Dashboard**
-2. **Vá para o seu projeto Dropi Chile**
-3. **Configure as variáveis de ambiente:**
-
+### 2. Variáveis de Ambiente
 ```env
 RAILWAY_ENVIRONMENT=production
+DATABASE_URL=[postgresql-url]
 PYTHONUNBUFFERED=1
-PYTHONPATH=/app
-DATABASE_URL=[sua-url-postgresql]
 ```
 
-4. **Atualize o comando de deploy:**
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `python chile_background_bot.py`
-
 ### 3. Deploy
-
 ```bash
-# Commit e push das mudanças
 git add .
-git commit -m "Migrate to background automation with 6h scheduling"
+git commit -m "Deploy Railway cron automation"
 git push origin main
 ```
 
-O Railway automaticamente detectará as mudanças e fará o redeploy.
+## ⏰ Horários de Execução
 
-## 📊 Webhook Discord
+**Cron**: `0 */6 * * *`
+- **00:00 UTC** (21:00 Chile)
+- **06:00 UTC** (03:00 Chile)
+- **12:00 UTC** (09:00 Chile)
+- **18:00 UTC** (15:00 Chile)
 
-O sistema enviará notificações para o Discord configurado:
+## 💻 Desenvolvimento Local
 
+### Modo Visual
+- **Local**: Chrome abre visualmente para debug
+- **Railway**: Continua headless
+
+### Teste
+```bash
+python chile_background_bot.py  # Execução manual
 ```
-https://discord.com/api/webhooks/1379273630290284606/h1I670CtBauZ0J7_Oq2K5pPJOIZEAHkfI_9-gexG4jmMI0g5bMxRODt85BEcMyX_vkN_
+
+## 📊 Discord Notifications
+
+Webhook configurado para notificar:
+- 🚀 Início da execução
+- ✅ Sucesso com estatísticas
+- ❌ Erros com detalhes
+- ⚠️ Avisos (sem novelties)
+
+## 🔄 Funcionamento
+
+### Fluxo Normal
+1. Login automático no Dropi
+2. Navega para novelties
+3. Aguarda loading completar
+4. Configura visualização (1000 entradas)
+5. Processa cada novelty disponível
+6. Salva resultados no banco
+7. Notifica Discord
+8. Termina processo (`sys.exit(0)`)
+
+### Processamento Inteligente
+- **Cliente Ausente**: "Entramos en contacto..."
+- **Problema Cobrança**: "Cliente afirmó que estará con dinero..."
+- **Endereço Incorreto**: "Cliente rectificó sus datos..."
+- **Rejeição**: "Cliente afirma que quiere el producto..."
+
+## 🐛 Troubleshooting
+
+### ❌ "Nenhuma novelty encontrada"
+- Sistema aguarda "Loading..." desaparecer
+- Verifica múltiplos seletores de tabela
+- Captura screenshot para debug
+
+### ❌ "Linha não encontrada na tabela" 
+- Normal - elementos podem sumir após processamento
+- Sistema continua com próxima linha
+- Não indica falha real
+
+### ❌ Cron não executa
+```bash
+# Verificar configuração
+railway logs --follow
+
+# Forçar execução manual
+railway run python chile_background_bot.py
 ```
 
-### Tipos de Notificação:
-
-- 🚀 **Início**: Quando a automação inicia
-- ✅ **Sucesso**: Relatório completo de execução
-- ❌ **Erro**: Falhas com detalhes técnicos
-- 🔍 **Monitor**: Status de saúde do sistema
-
-## ⏰ Agendamento
-
-O bot executa **automaticamente a cada 6 horas**:
-
-- **00:00 UTC** (21:00 UTC-3)
-- **06:00 UTC** (03:00 UTC-3) 
-- **12:00 UTC** (09:00 UTC-3)
-- **18:00 UTC** (15:00 UTC-3)
-
-### Modificar Agendamento
-
-Para alterar o intervalo, edite a linha no `chile_background_bot.py`:
-
-```python
-# De 6 horas para outro intervalo
-schedule.every(6).hours.do(run_scheduled_automation)
-
-# Exemplos:
-schedule.every(4).hours.do(run_scheduled_automation)    # A cada 4 horas
-schedule.every().day.at("09:00").do(run_scheduled_automation)  # Diário às 9h
-schedule.every().hour.do(run_scheduled_automation)      # A cada hora
-```
+### ❌ Login falha
+- Verificar credenciais no código
+- Confirmar acesso ao site Dropi
+- Verificar screenshots salvos
 
 ## 📈 Monitoramento
 
-### Health Check Manual
-
+### Health Check
 ```bash
-# Via Railway CLI
-railway run python monitor.py health
-
-# Ou apenas status
-railway run python monitor.py status
+python monitor.py health  # Verificação completa
 ```
 
-### Logs em Tempo Real
-
+### Logs
 ```bash
-# Via Railway CLI
-railway logs
-
-# Ou filtrando por erros
-railway logs | grep ERROR
+railway logs | grep ERROR  # Apenas erros
+railway logs --follow     # Tempo real
 ```
 
-### Verificar Banco de Dados
-
-O sistema continua salvando no mesmo schema PostgreSQL:
-
+### Banco de Dados
 ```sql
--- Verificar execuções recentes
-SELECT * FROM automation_executions 
-WHERE country = 'chile' 
+SELECT * FROM execution_history 
+WHERE source_country = 'chile' 
 ORDER BY execution_date DESC 
 LIMIT 10;
 ```
 
-## 🛠️ Troubleshooting
+## 🎯 Vantagens vs Versão Anterior
 
-### ❌ Bot não está executando
+| Anterior | Atual |
+|----------|-------|
+| Schedule library + while loop | Railway Native Cron |
+| Processo sempre rodando | Execução sob demanda |
+| Memory leaks possíveis | Processo limpo |
+| Logs confusos | Logs por execução |
+| Difícil debug | Chrome visual local |
 
-1. **Verificar logs do Railway:**
-   ```bash
-   railway logs --follow
-   ```
+## 📋 Próximos Passos
 
-2. **Verificar variáveis de ambiente:**
-   - `DATABASE_URL` está configurada?
-   - `RAILWAY_ENVIRONMENT` = "production"?
+1. ✅ Configurar cron schedule no Railway
+2. ✅ Fazer deploy do código atualizado  
+3. ✅ Verificar primeira execução via logs
+4. ✅ Confirmar notificação Discord
+5. ✅ Monitorar execuções seguintes
 
-3. **Reiniciar o serviço:**
-   ```bash
-   railway up --detach
-   ```
-
-### ❌ Erros de Chrome/Selenium
-
-O Dockerfile já inclui Chrome e ChromeDriver otimizados. Se houver problemas:
-
-1. **Verificar se headless está ativo:**
-   ```python
-   # No código, sempre deve ter:
-   chrome_options.add_argument("--headless=new")
-   ```
-
-2. **Verificar recursos do sistema:**
-   ```bash
-   railway run python monitor.py status
-   ```
-
-### ❌ Problemas de memória
-
-1. **Monitorar uso:**
-   ```bash
-   railway metrics
-   ```
-
-2. **Otimizar configuração do Chrome:**
-   ```python
-   chrome_options.add_argument("--disable-dev-shm-usage")
-   chrome_options.add_argument("--no-sandbox")
-   ```
-
-### ❌ Falhas de conexão com Dropi
-
-O sistema tem recovery automático, mas se persistir:
-
-1. **Verificar credenciais:**
-   ```python
-   self.email = "llegolatiendachile@gmail.com"
-   self.password = "Chegou123!"
-   ```
-
-2. **Verificar URLs do Dropi:**
-   - Site pode ter mudado estrutura
-   - Verificar se `https://app.dropi.cl/dashboard/novelties` está acessível
-
-## 🔄 Migração do Sistema Anterior
-
-### O que mudou:
-
-| Anterior (Streamlit) | Novo (Background) |
-|---------------------|-------------------|
-| Interface web manual | 100% automatizado |
-| Execução sob demanda | A cada 6 horas |
-| Logs na interface | Logs no arquivo + Discord |
-| Requer intervenção | Completamente autônomo |
-
-### Banco de dados:
-
-- ✅ **Schema inalterado** - usa as mesmas tabelas
-- ✅ **Queries inalteradas** - mesma estrutura de dados
-- ✅ **Histórico preservado** - dados anteriores mantidos
-
-## 📋 Checklist de Deploy
-
-- [ ] Código atualizado no repositório
-- [ ] `requirements.txt` atualizado
-- [ ] Variáveis de ambiente configuradas no Railway
-- [ ] Comando de start atualizado: `python chile_background_bot.py`
-- [ ] Webhook Discord funcionando
-- [ ] Conexão com PostgreSQL testada
-- [ ] Primeiro deploy realizado
-- [ ] Notificação de início recebida no Discord
-- [ ] Logs sendo gerados corretamente
-
-## 🎯 Próximos Passos
-
-1. **Deploy e teste inicial**
-2. **Monitorar primeira execução** (Discord + logs)
-3. **Verificar dados no banco** após primeira execução
-4. **Configurar alertas** se necessário
-5. **Documentar** ajustes específicos do ambiente
-
----
-
-## 📞 Suporte
-
-Em caso de problemas:
-
-1. **Verificar notificações Discord** para status atual
-2. **Consultar logs** via `railway logs`
-3. **Executar health check** com `monitor.py`
-4. **Verificar banco de dados** para resultados
-
-**Sistema projetado para ser completamente autônomo após o deploy inicial!** 🚀
+**Sistema otimizado para produção Railway com debug local facilitado!** 🚀

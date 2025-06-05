@@ -3,6 +3,7 @@
 """
 VERSÃO CORRIGIDA - Dropi Chile Bot para Railway Cron Jobs
 Executa UMA VEZ e termina (para ser usado com Railway Native Cron)
+CORREÇÃO: Processamento dinâmico - resolve "Linha não encontrada na tabela"
 """
 
 import time
@@ -64,8 +65,6 @@ class DroplAutomationBot:
         self.closed_tabs = 0
         self.found_pagination = False
         self.rows = []
-        self.current_row_index = 0
-        self.current_retry_count = 0
         self.total_items = 0
         
         # Credenciais fixas
@@ -577,65 +576,6 @@ class DroplAutomationBot:
             self.driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(2)
             
-            # Obtém todas as linhas da tabela com múltiplas tentativas
-            logger.info("📊 Contando linhas da tabela...")
-            for tentativa in range(3):
-                try:
-                    # Aguarda um pouco mais a cada tentativa
-                    if tentativa > 0:
-                        logger.info(f"🔄 Tentativa {tentativa + 1} de localizar linhas...")
-                        time.sleep(5)
-                    
-                    # Múltiplos seletores para localizar as linhas
-                    rows_selectors = [
-                        "//table/tbody/tr[td]",  # Linhas com células
-                        "//table/tbody/tr",
-                        "//table//tr[position() > 1]",
-                        "//table//tr[contains(@class, 'row')]",
-                        "//table tr:not(:first-child)"
-                    ]
-                    
-                    rows = []
-                    for selector in rows_selectors:
-                        try:
-                            found_rows = self.driver.find_elements(By.XPATH, selector)
-                            if found_rows:
-                                rows = found_rows
-                                logger.info(f"✅ Linhas encontradas com seletor: {selector}")
-                                break
-                        except:
-                            continue
-                    
-                    if rows:
-                        break
-                        
-                except Exception as e:
-                    logger.warning(f"⚠️ Tentativa {tentativa + 1} falhou: {str(e)}")
-                    if tentativa < 2:
-                        continue
-                    else:
-                        rows = []
-            
-            self.rows = rows
-            self.total_items = len(rows)
-            logger.info(f"📈 Total de {len(rows)} novelties encontradas para processar")
-            
-            if len(rows) == 0:
-                try:
-                    page_text = self.driver.find_element(By.TAG_NAME, "body").text
-                    logger.info(f"📄 Texto da página: {page_text[:800]}...")
-                    
-                    # Captura screenshot para debug quando não encontra linhas
-                    try:
-                        screenshot_path = os.path.join(self.create_screenshots_folder(), "no_rows_found.png")
-                        self.driver.save_screenshot(screenshot_path)
-                        logger.info(f"📸 Screenshot salvo para debug: {screenshot_path}")
-                    except:
-                        pass
-                        
-                except:
-                    pass
-            
             return True
         except Exception as e:
             logger.error(f"❌ Erro ao configurar exibição de entradas: {str(e)}")
@@ -824,467 +764,298 @@ class DroplAutomationBot:
         except Exception as e:
             logger.error(f"❌ Erro ao verificar e fechar guias: {str(e)}")
 
-    def run_automation(self):
-        """Executa o processo completo de automação - EXECUÇÃO ÚNICA"""
+    def get_available_novelty_rows(self):
+        """
+        Obtém todas as linhas que têm botão Save disponível
+        """
         try:
-            self.execution_start_time = datetime.datetime.now()
+            # Aguarda tabela estar presente
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "//table"))
+            )
             
-            # Notificação inicial
-            timezone_info = datetime.timezone(datetime.timedelta(hours=-3))  # UTC-3
-            start_time_local = self.execution_start_time.replace(tzinfo=timezone_info)
-            start_message = f"🚀 **Cron Job iniciado** ({start_time_local.strftime('%H:%M')} UTC-3)\n\n📅 Próxima execução: em 6 horas\n🔧 Modo: Railway Native Cron"
-            self.send_discord_notification(start_message)
+            # Procura por linhas com botão Save
+            rows_with_save = []
             
-            logger.info("=" * 50)
-            logger.info("🚀 INICIANDO AUTOMAÇÃO CRON JOB")
-            logger.info("=" * 50)
+            # Múltiplos seletores para encontrar linhas
+            row_selectors = [
+                "//table/tbody/tr[.//button[contains(@class, 'btn-success')]]",
+                "//table//tr[.//button[contains(text(), 'Save')]]",
+                "//table//tr[.//button[contains(@class, 'btn-success') and contains(text(), 'Save')]]"
+            ]
             
-            # Setup do driver
-            logger.info("🔧 PASSO 1: Configurando driver...")
-            if not self.setup_driver():
-                raise Exception("Falha ao configurar o driver Chrome")
-            logger.info("✅ Driver configurado com sucesso")
-            
-            # Login
-            logger.info("🔐 PASSO 2: Fazendo login...")
-            if not self.login():
-                raise Exception("Falha no login")
-            logger.info("✅ Login realizado com sucesso")
-            
-            # Navegar para novelties
-            logger.info("🧭 PASSO 3: Navegando para novelties...")
-            if not self.navigate_to_novelties():
-                raise Exception("Falha ao navegar até Novelties")
-            logger.info("✅ Navegação para novelties concluída")
-            
-            # Configurar exibição
-            logger.info("⚙️ PASSO 4: Configurando exibição de entradas...")
-            if not self.configure_entries_display():
-                raise Exception("Falha ao configurar exibição de entradas")
-            logger.info(f"✅ Configuração concluída - {self.total_items} novelties encontradas")
-            
-            # Verificar se há novelties para processar
-            if self.total_items == 0:
-                logger.warning("⚠️ Nenhuma novelty encontrada para processar")
-                no_items_message = f"""📊 **Execução concluída - sem novelties**
-
-⚠️ Nenhuma novelty encontrada para processar
-
-**Possíveis causas:**
-• Todas já foram processadas
-• Página não carregou corretamente  
-• Filtros ativos na tabela
-• Mudança na estrutura do site
-
-🔄 **Próxima verificação:** em 6 horas"""
-                self.send_discord_notification(no_items_message, is_error=False)
-                return
-            
-            # Processar novelties
-            logger.info(f"🔄 PASSO 5: Processando {self.total_items} novelties...")
-            
-            # Loop de processamento com log detalhado
-            while self.current_row_index < len(self.rows):
+            for selector in row_selectors:
                 try:
-                    logger.info(f"📋 Processando novelty {self.current_row_index + 1}/{len(self.rows)}")
-                    
-                    if not self.process_current_novelty():
-                        # Se retornou False, continua para a próxima
-                        logger.info(f"✅ Novelty {self.current_row_index} processada, continuando...")
-                        continue
-                    else:
-                        # Se retornou True, todas foram processadas
-                        logger.info("🎯 Todas as novelties foram processadas")
+                    found_rows = self.driver.find_elements(By.XPATH, selector)
+                    if found_rows:
+                        rows_with_save = found_rows
+                        logger.info(f"✅ Encontradas {len(found_rows)} linhas com botão Save usando: {selector}")
                         break
-                        
                 except Exception as e:
-                    logger.error(f"❌ Erro ao processar novelty {self.current_row_index}: {str(e)}")
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-                    self.failed_items.append({
-                        "id": f"Linha {self.current_row_index + 1}",
-                        "error": str(e)
-                    })
-                    self.failed_count = len(self.failed_items)
-                    self.current_row_index += 1
+                    logger.debug(f"Seletor falhou: {selector} - {str(e)}")
+                    continue
             
-            logger.info("📊 PASSO 6: Processamento concluído")
-            logger.info(f"✅ Sucessos: {self.success_count}, ❌ Falhas: {self.failed_count}")
+            # Filtra apenas linhas visíveis
+            visible_rows = []
+            for row in rows_with_save:
+                try:
+                    if row.is_displayed():
+                        # Verifica se realmente tem botão Save visível
+                        save_buttons = row.find_elements(By.XPATH, ".//button[contains(@class, 'btn-success')]")
+                        if save_buttons and any(btn.is_displayed() for btn in save_buttons):
+                            visible_rows.append(row)
+                except Exception as e:
+                    logger.debug(f"Erro ao verificar visibilidade da linha: {str(e)}")
+                    continue
             
-            # Gerar relatório
-            logger.info("📋 PASSO 7: Gerando relatório...")
-            self.generate_report()
-            
-            # Salvar no banco de dados
-            logger.info("💾 PASSO 8: Salvando no banco de dados...")
-            self.save_to_database()
-            
-            # Notificação de sucesso/conclusão
-            execution_time = (datetime.datetime.now() - self.execution_start_time).total_seconds()
-            
-            if self.success_count > 0:
-                success_message = f"""✅ **Cron Job concluído com sucesso!**
-
-📊 **Resultados:**
-• ✅ Processadas: **{self.success_count}**
-• ❌ Falhas: **{self.failed_count}**
-• 📋 Total encontradas: **{self.total_items}**
-• 🗂️ Guias fechadas: **{self.closed_tabs}**
-• ⏱️ Tempo: **{execution_time/60:.2f} min**
-
-🔧 **Detalhes:**
-• 📄 Paginação: {'✅ Sim' if self.found_pagination else '❌ Não'}
-• 📸 Screenshots: {len(os.listdir('screenshots')) if os.path.exists('screenshots') else 0}
-• 🔄 **Próxima execução:** em 6 horas"""
-            else:
-                success_message = f"""⚠️ **Cron Job finalizado sem processamentos**
-
-📊 **Estatísticas:**
-• 📋 Novelties encontradas: **{self.total_items}**
-• ✅ Processadas: **{self.success_count}**
-• ❌ Falhas: **{self.failed_count}**
-• ⏱️ Tempo: **{execution_time/60:.2f} min**
-
-❓ **Possíveis causas:**
-• Todas já processadas anteriormente
-• Erro na detecção dos botões Save
-• Mudança na estrutura do site
-
-🔄 **Próxima verificação:** em 6 horas"""
-
-            if self.failed_count > 0:
-                success_message += f"\n\n⚠️ **Falhas encontradas:**"
-                for i, item in enumerate(self.failed_items[:3]):  # Mostra apenas as primeiras 3
-                    success_message += f"\n• {item['id']}: {item['error'][:50]}..."
-                
-                if len(self.failed_items) > 3:
-                    success_message += f"\n• ... e mais {len(self.failed_items) - 3} falhas"
-            
-            # Determina se é erro baseado nos resultados
-            is_error = (self.success_count == 0 and self.total_items > 0) or (self.failed_count > self.success_count)
-            self.send_discord_notification(success_message, is_error=is_error)
-            
-            logger.info("=" * 50)
-            logger.info("🎯 AUTOMAÇÃO CRON JOB CONCLUÍDA")
-            logger.info("=" * 50)
+            logger.info(f"📊 Linhas visíveis com botão Save: {len(visible_rows)}")
+            return visible_rows
             
         except Exception as e:
-            logger.error(f"❌ ERRO CRÍTICO na automação: {str(e)}")
-            logger.error(f"Traceback completo: {traceback.format_exc()}")
-            
-            # Captura screenshot de erro se possível
-            try:
-                if self.driver:
-                    error_screenshot = os.path.join(self.create_screenshots_folder(), "error.png")
-                    self.driver.save_screenshot(error_screenshot)
-                    logger.info(f"📸 Screenshot de erro salvo: {error_screenshot}")
-            except:
-                pass
-            
-            # Notificação de erro detalhada
-            execution_time = (datetime.datetime.now() - self.execution_start_time).total_seconds() if self.execution_start_time else 0
-            
-            error_message = f"""❌ **ERRO CRÍTICO no Cron Job!**
+            logger.error(f"❌ Erro ao obter linhas disponíveis: {str(e)}")
+            return []
 
-🚨 **Erro:** {str(e)[:300]}
-
-📊 **Progresso até o erro:**
-• ✅ Processadas: {self.success_count}
-• ❌ Falhas: {self.failed_count}
-• 📋 Encontradas: {self.total_items}
-• ⏱️ Tempo até falha: {execution_time/60:.2f} min
-
-🔧 **Para debug:**
-• Verificar logs completos no Railway
-• Verificar screenshots salvos
-• Testar acesso manual ao Dropi
-
-🔄 **Próxima tentativa:** em 6 horas"""
-
-            self.send_discord_notification(error_message, is_error=True)
-            
-        finally:
-            # Fecha o navegador
-            if self.driver:
-                try:
-                    logger.info("🔒 Fechando navegador...")
-                    self.driver.quit()
-                    logger.info("✅ Navegador fechado com sucesso")
-                except Exception as e:
-                    logger.warning(f"⚠️ Erro ao fechar navegador: {str(e)}")
-            
-            # IMPORTANTE: Termina o processo para permitir próxima execução
-            logger.info("🏁 Terminando processo...")
-            sys.exit(0)
-
-    def process_current_novelty(self):
-        """Processa a novelty atual na lista"""
+    def process_single_novelty(self, row_element, iteration_number):
+        """
+        Processa uma única novelty
+        Parâmetros:
+        - row_element: elemento da linha da tabela
+        - iteration_number: número da iteração para logs
+        """
         try:
-            # Verifica se ainda há novelties para processar
-            if self.current_row_index >= len(self.rows):
-                logger.info("🎯 Todas as novelties foram processadas")
-                return True
+            logger.info(f"🎯 Processando novelty (iteração {iteration_number})")
             
-            # Recarrega as linhas para evitar StaleElementReference
+            # Rola até a linha
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", row_element)
+            time.sleep(1)
+            
+            # Obtém ID da linha para logs
             try:
-                fresh_rows = self.driver.find_elements(By.XPATH, "//table/tbody/tr")
-                if fresh_rows and self.current_row_index < len(fresh_rows):
-                    current_row = fresh_rows[self.current_row_index]
-                    row_id = f"Linha {self.current_row_index + 1}"
-                    
-                    try:
-                        row_cells = current_row.find_elements(By.TAG_NAME, "td")
-                        if row_cells:
-                            row_id = row_cells[0].text or row_id
-                    except:
-                        pass
-                    
-                    logger.info(f"🔄 Processando novelty {row_id} ({self.current_row_index+1}/{len(fresh_rows)})")
-                else:
-                    logger.warning("⚠️ Não foi possível localizar a linha atual na tabela")
-                    self.failed_items.append({
-                        "id": f"Linha {self.current_row_index + 1}",
-                        "error": "Linha não encontrada na tabela"
-                    })
-                    self.failed_count = len(self.failed_items)
-                    self.current_row_index += 1
-                    return False
-            except Exception as e:
-                logger.error(f"❌ Erro ao recarregar linhas: {str(e)}")
-                self.failed_items.append({
-                    "id": f"Linha {self.current_row_index + 1}",
-                    "error": f"Erro ao recarregar: {str(e)}"
-                })
-                self.failed_count = len(self.failed_items)
-                self.current_row_index += 1
+                row_cells = row_element.find_elements(By.TAG_NAME, "td")
+                row_id = row_cells[0].text if row_cells else f"Iteração {iteration_number}"
+            except:
+                row_id = f"Iteração {iteration_number}"
+            
+            logger.info(f"📋 Processando: {row_id}")
+            
+            # Encontra botão Save na linha
+            save_buttons = row_element.find_elements(By.XPATH, ".//button[contains(@class, 'btn-success')]")
+            
+            if not save_buttons:
+                logger.error("❌ Botão Save não encontrado na linha")
                 return False
             
-            # Atualiza contadores
-            self.processed_items = self.current_row_index + 1
-            processing_success = False  # Flag para verificar sucesso real
+            save_button = save_buttons[0]
             
-            # Clica no botão Save
+            # Clica no Save
             try:
-                save_buttons = current_row.find_elements(By.XPATH, ".//button[contains(@class, 'btn-success')]")
-                
-                if save_buttons:
-                    save_button = save_buttons[0]
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_button)
-                    time.sleep(1)
-                    self.driver.execute_script("arguments[0].click();", save_button)
-                    logger.info("✅ Botão 'Save' clicado")
-                    
-                    # Aguarda popup aparecer
-                    time.sleep(5)
-                    
-                    # Verifica se popup/modal apareceu
-                    modal_appeared = False
-                    try:
-                        WebDriverWait(self.driver, 10).until(
-                            EC.any_of(
-                                EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'modal')]")),
-                                EC.presence_of_element_located((By.XPATH, "//button[contains(text(), 'Yes')]")),
-                                EC.presence_of_element_located((By.XPATH, "//button[contains(text(), 'Sim')]"))
-                            )
-                        )
-                        modal_appeared = True
-                        logger.info("✅ Modal/popup detectado com sucesso")
-                    except TimeoutException:
-                        logger.error("❌ Modal/popup não apareceu - item pode já estar processado")
-                        raise Exception("Modal não apareceu após clicar Save")
-                    
-                    if modal_appeared:
-                        # Clica em Yes/Sim
-                        yes_clicked = False
-                        for text in ["Yes", "Sim", "YES", "SIM", "yes", "sim"]:
-                            try:
-                                yes_buttons = self.driver.find_elements(By.XPATH, f"//button[contains(text(), '{text}')]")
-                                for button in yes_buttons:
-                                    if button.is_displayed():
-                                        self.driver.execute_script("arguments[0].click();", button)
-                                        logger.info(f"✅ Clicado no botão '{text}'")
-                                        yes_clicked = True
-                                        break
-                                if yes_clicked:
-                                    break
-                            except:
-                                continue
-                        
-                        if not yes_clicked:
-                            raise Exception("Não foi possível clicar em 'Yes'/'Sim'")
-                        
-                        time.sleep(5)
-                        
-                        # Extrai informações do cliente
-                        customer_info = self.extract_customer_info()
-                        
-                        # Analisa texto para mensagem automática
-                        try:
-                            page_text = self.driver.find_element(By.TAG_NAME, "body").text
-                            automatic_message = self.generate_automatic_message(page_text)
-                            if automatic_message:
-                                customer_info["automatic_message"] = automatic_message
-                        except Exception as e:
-                            logger.debug(f"Erro ao analisar texto da página: {str(e)}")
-                        
-                        # Procura e preenche formulário
-                        form_filled = False
-                        try:
-                            # Procura pelo modal ou formulário
-                            form_modal = None
-                            try:
-                                form_modal = WebDriverWait(self.driver, 10).until(
-                                    EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
-                                )
-                            except:
-                                try:
-                                    form_modal = self.driver.find_element(By.TAG_NAME, "body")
-                                except:
-                                    pass
-                            
-                            if form_modal:
-                                # Preenche campos principais
-                                address_components = self.parse_chilean_address(customer_info["address"])
-                                
-                                # Lista de campos para preencher
-                                fields_to_fill = [
-                                    (["Datos adicionales a la dirección", "Datos adicionales"], customer_info["address"]),
-                                    (["Solución", "Solucion"], customer_info.get("automatic_message", customer_info["address"])),
-                                    (["Calle"], address_components["calle"]),
-                                    (["Numero", "Número"], address_components["numero"]),
-                                    (["Comuna"], address_components["comuna"]),
-                                    (["Region", "Región"], address_components["region"]),
-                                    (["Nombre", "Nome"], customer_info["name"]),
-                                    (["Celular", "Teléfono"], customer_info["phone"])
-                                ]
-                                
-                                fields_filled = 0
-                                for labels, value in fields_to_fill:
-                                    if self.fill_field_by_label(form_modal, labels, value):
-                                        fields_filled += 1
-                                
-                                logger.info(f"✏️ Preenchidos {fields_filled} campos")
-                                
-                                if fields_filled > 0:
-                                    # Clica em salvar
-                                    if self.click_save_button():
-                                        form_filled = True
-                                        logger.info("✅ Formulário salvo com sucesso")
-                                    else:
-                                        raise Exception("Falha ao salvar formulário")
-                                else:
-                                    raise Exception("Nenhum campo foi preenchido")
-                            else:
-                                raise Exception("Modal do formulário não encontrado")
-                            
-                        except Exception as e:
-                            logger.error(f"❌ Erro ao preencher formulário: {str(e)}")
-                            raise Exception(f"Falha no formulário: {str(e)}")
-                        
-                        if form_filled:
-                            # Aguarda processamento inicial
-                            time.sleep(8)
-                            
-                            # Procura por popup de confirmação/sucesso
-                            confirmation_found = False
-                            try:
-                                # Procura por indicadores de sucesso
-                                success_indicators = [
-                                    "//div[contains(text(), 'Success')]",
-                                    "//div[contains(text(), 'Éxito')]", 
-                                    "//div[contains(text(), 'Guardado')]",
-                                    "//div[contains(text(), 'Saved')]",
-                                    "//*[contains(@class, 'alert-success')]",
-                                    "//*[contains(@class, 'success')]"
-                                ]
-                                
-                                for indicator in success_indicators:
-                                    elements = self.driver.find_elements(By.XPATH, indicator)
-                                    if elements:
-                                        confirmation_found = True
-                                        logger.info(f"✅ Confirmação de sucesso encontrada: {indicator}")
-                                        break
-                                
-                                if not confirmation_found:
-                                    logger.warning("⚠️ Nenhuma confirmação de sucesso encontrada")
-                                    
-                            except Exception as e:
-                                logger.warning(f"⚠️ Erro ao verificar confirmação: {str(e)}")
-                            
-                            # Clica em OK/Aceptar se houver popup de confirmação
-                            ok_clicked = False
-                            try:
-                                for text in ["OK", "Ok", "ACEPTAR", "Aceptar", "CERRAR", "Cerrar", "CLOSE", "Close"]:
-                                    ok_buttons = self.driver.find_elements(By.XPATH, f"//button[contains(text(), '{text}')]")
-                                    for button in ok_buttons:
-                                        if button.is_displayed():
-                                            self.driver.execute_script("arguments[0].click();", button)
-                                            logger.info(f"✅ Clicado no botão de confirmação '{text}'")
-                                            ok_clicked = True
-                                            time.sleep(3)
-                                            break
-                                    if ok_clicked:
-                                        break
-                            except Exception as e:
-                                logger.warning(f"⚠️ Erro ao clicar em confirmação: {str(e)}")
-                            
-                            # Aguarda mais tempo para garantir salvamento
-                            time.sleep(5)
-                            
-                            # Verifica se ainda está no modal (indica que não salvou)
-                            still_in_modal = False
-                            try:
-                                modal_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'modal') and contains(@style, 'display: block')]")
-                                if modal_elements:
-                                    still_in_modal = True
-                                    logger.warning("⚠️ Ainda está no modal - pode não ter salvado")
-                                else:
-                                    logger.info("✅ Modal fechado - provável sucesso")
-                            except:
-                                pass
-                            
-                            # Verifica e fecha guias extras
-                            self.check_and_close_tabs()
-                            
-                            # Marca como sucesso só se tiver confirmação ou modal fechou
-                            if confirmation_found or not still_in_modal:
-                                processing_success = True
-                                logger.info(f"✅ Novelty {row_id} CONFIRMADAMENTE processada!")
-                            else:
-                                logger.error(f"❌ Novelty {row_id} pode não ter sido salva - falta confirmação")
-                                raise Exception("Falta confirmação de salvamento")
-                        
-                else:
-                    raise Exception("Botão 'Save' não encontrado")
-                    
+                self.driver.execute_script("arguments[0].click();", save_button)
+                logger.info("✅ Botão Save clicado")
             except Exception as e:
-                logger.error(f"❌ Erro ao processar novelty: {str(e)}")
-                self.failed_items.append({
-                    "id": row_id,
-                    "error": str(e)
-                })
-                self.failed_count = len(self.failed_items)
+                logger.error(f"❌ Erro ao clicar no Save: {str(e)}")
+                return False
             
-            # Só incrementa success_count se realmente processou
-            if processing_success:
-                self.success_count += 1
+            # Aguarda modal aparecer
+            time.sleep(5)
             
-            # Incrementa índice sempre
-            self.current_row_index += 1
+            # Verifica se modal apareceu
+            modal_appeared = False
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.any_of(
+                        EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'modal')]")),
+                        EC.presence_of_element_located((By.XPATH, "//button[contains(text(), 'Yes')]")),
+                        EC.presence_of_element_located((By.XPATH, "//button[contains(text(), 'Sim')]"))
+                    )
+                )
+                modal_appeared = True
+                logger.info("✅ Modal detectado")
+            except TimeoutException:
+                logger.error("❌ Modal não apareceu - item pode já estar processado")
+                return False
             
-            # Pausa entre processamentos
-            time.sleep(2)
+            if not modal_appeared:
+                return False
             
-            return False  # Continua processando
+            # Clica em Yes/Sim
+            yes_clicked = False
+            for text in ["Yes", "Sim", "YES", "SIM"]:
+                try:
+                    yes_buttons = self.driver.find_elements(By.XPATH, f"//button[contains(text(), '{text}')]")
+                    for button in yes_buttons:
+                        if button.is_displayed():
+                            self.driver.execute_script("arguments[0].click();", button)
+                            logger.info(f"✅ Clicado em '{text}'")
+                            yes_clicked = True
+                            break
+                    if yes_clicked:
+                        break
+                except:
+                    continue
+            
+            if not yes_clicked:
+                logger.error("❌ Não foi possível clicar em Yes/Sim")
+                return False
+            
+            time.sleep(5)
+            
+            # Extrai informações e preenche formulário
+            customer_info = self.extract_customer_info()
+            
+            # Processa formulário
+            form_success = self.fill_and_submit_form(customer_info)
+            
+            if form_success:
+                # Aguarda finalização
+                time.sleep(8)
+                
+                # Verifica se modal fechou (sucesso)
+                modal_closed = True
+                try:
+                    modal_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'modal') and contains(@style, 'display: block')]")
+                    if modal_elements:
+                        modal_closed = False
+                except:
+                    pass
+                
+                # Fecha guias extras
+                self.check_and_close_tabs()
+                
+                if modal_closed:
+                    logger.info(f"✅ Novelty {row_id} processada com sucesso!")
+                    return True
+                else:
+                    logger.warning(f"⚠️ Modal ainda aberto para {row_id}")
+                    return False
+            else:
+                logger.error(f"❌ Falha no formulário para {row_id}")
+                return False
             
         except Exception as e:
-            logger.error(f"❌ Erro geral ao processar novelty: {str(e)}")
-            self.failed_items.append({
-                "id": f"Linha {self.current_row_index + 1}",
-                "error": str(e)
-            })
-            self.failed_count = len(self.failed_items)
-            self.current_row_index += 1
+            logger.error(f"❌ Erro ao processar novelty: {str(e)}")
+            logger.error(traceback.format_exc())
             return False
+
+    def fill_and_submit_form(self, customer_info):
+        """
+        Preenche e submete o formulário da novelty
+        """
+        try:
+            # Analisa texto para mensagem automática
+            try:
+                page_text = self.driver.find_element(By.TAG_NAME, "body").text
+                automatic_message = self.generate_automatic_message(page_text)
+                if automatic_message:
+                    customer_info["automatic_message"] = automatic_message
+            except Exception as e:
+                logger.debug(f"Erro ao analisar texto: {str(e)}")
+            
+            # Procura formulário
+            form_modal = None
+            try:
+                form_modal = WebDriverWait(self.driver, 10).until(
+                    EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
+                )
+            except:
+                try:
+                    form_modal = self.driver.find_element(By.TAG_NAME, "body")
+                except:
+                    logger.error("❌ Formulário não encontrado")
+                    return False
+            
+            if not form_modal:
+                return False
+            
+            # Preenche campos
+            address_components = self.parse_chilean_address(customer_info["address"])
+            
+            fields_to_fill = [
+                (["Datos adicionales a la dirección", "Datos adicionales"], customer_info["address"]),
+                (["Solución", "Solucion"], customer_info.get("automatic_message", customer_info["address"])),
+                (["Calle"], address_components["calle"]),
+                (["Numero", "Número"], address_components["numero"]),
+                (["Comuna"], address_components["comuna"]),
+                (["Region", "Región"], address_components["region"]),
+                (["Nombre", "Nome"], customer_info["name"]),
+                (["Celular", "Teléfono"], customer_info["phone"])
+            ]
+            
+            fields_filled = 0
+            for labels, value in fields_to_fill:
+                if self.fill_field_by_label(form_modal, labels, value):
+                    fields_filled += 1
+            
+            logger.info(f"✏️ Preenchidos {fields_filled} campos")
+            
+            if fields_filled > 0:
+                # Salva formulário
+                if self.click_save_button():
+                    logger.info("✅ Formulário salvo")
+                    return True
+                else:
+                    logger.error("❌ Falha ao salvar formulário")
+                    return False
+            else:
+                logger.error("❌ Nenhum campo preenchido")
+                return False
+            
+        except Exception as e:
+            logger.error(f"❌ Erro no formulário: {str(e)}")
+            return False
+
+    def process_all_novelties(self):
+        """
+        NOVA VERSÃO: Processa novelties dinamicamente
+        Sempre pega a primeira linha disponível com botão Save
+        """
+        try:
+            logger.info(f"🔄 Iniciando processamento dinâmico de novelties...")
+            
+            max_iterations = 100  # Limite de segurança
+            iteration = 0
+            
+            while iteration < max_iterations:
+                iteration += 1
+                
+                logger.info(f"🔄 Iteração {iteration} - Buscando novelties disponíveis...")
+                
+                # Aguarda página estabilizar
+                time.sleep(3)
+                
+                # Recarrega todas as linhas da tabela
+                available_rows = self.get_available_novelty_rows()
+                
+                if not available_rows:
+                    logger.info("✅ Nenhuma novelty disponível para processar - Finalizando")
+                    break
+                
+                logger.info(f"📋 Encontradas {len(available_rows)} novelties disponíveis")
+                
+                # Sempre processa a PRIMEIRA linha disponível
+                success = self.process_single_novelty(available_rows[0], iteration)
+                
+                if success:
+                    self.success_count += 1
+                    logger.info(f"✅ Novelty {iteration} processada com sucesso!")
+                else:
+                    self.failed_count += 1
+                    self.failed_items.append({
+                        "id": f"Iteração {iteration}",
+                        "error": "Falha no processamento"
+                    })
+                    logger.error(f"❌ Falha ao processar novelty {iteration}")
+                
+                # Pausa entre processamentos
+                time.sleep(2)
+            
+            if iteration >= max_iterations:
+                logger.warning("⚠️ Limite máximo de iterações atingido")
+            
+            logger.info(f"🎯 Processamento concluído: {self.success_count} sucessos, {self.failed_count} falhas")
+            
+        except Exception as e:
+            logger.error(f"❌ Erro no processamento de novelties: {str(e)}")
+            logger.error(traceback.format_exc())
 
     def fill_field_by_label(self, form_modal, label_texts, value):
         """Preenche um campo específico do formulário"""
@@ -1368,6 +1139,166 @@ class DroplAutomationBot:
             logger.error(f"❌ Erro ao clicar no botão de salvar: {str(e)}")
             return False
 
+    def run_automation(self):
+        """
+        VERSÃO CORRIGIDA - Executa automação com processamento dinâmico
+        """
+        try:
+            self.execution_start_time = datetime.datetime.now()
+            
+            # Notificação inicial
+            timezone_info = datetime.timezone(datetime.timedelta(hours=-3))
+            start_time_local = self.execution_start_time.replace(tzinfo=timezone_info)
+            start_message = f"🚀 **Cron Job iniciado** ({start_time_local.strftime('%H:%M')} UTC-3)\n\n📅 Próxima execução: em 6 horas\n🔧 Modo: Railway Native Cron (CORRIGIDO)"
+            self.send_discord_notification(start_message)
+            
+            logger.info("=" * 50)
+            logger.info("🚀 INICIANDO AUTOMAÇÃO CRON JOB (VERSÃO CORRIGIDA)")
+            logger.info("=" * 50)
+            
+            # Setup do driver
+            logger.info("🔧 PASSO 1: Configurando driver...")
+            if not self.setup_driver():
+                raise Exception("Falha ao configurar o driver Chrome")
+            logger.info("✅ Driver configurado com sucesso")
+            
+            # Login
+            logger.info("🔐 PASSO 2: Fazendo login...")
+            if not self.login():
+                raise Exception("Falha no login")
+            logger.info("✅ Login realizado com sucesso")
+            
+            # Navegar para novelties
+            logger.info("🧭 PASSO 3: Navegando para novelties...")
+            if not self.navigate_to_novelties():
+                raise Exception("Falha ao navegar até Novelties")
+            logger.info("✅ Navegação para novelties concluída")
+            
+            # Configurar exibição
+            logger.info("⚙️ PASSO 4: Configurando exibição de entradas...")
+            if not self.configure_entries_display():
+                raise Exception("Falha ao configurar exibição de entradas")
+            logger.info("✅ Configuração de exibição concluída")
+            
+            # NOVO: Processamento dinâmico
+            logger.info("🔄 PASSO 5: Processamento dinâmico de novelties...")
+            self.process_all_novelties()
+            
+            logger.info("📊 PASSO 6: Processamento concluído")
+            logger.info(f"✅ Sucessos: {self.success_count}, ❌ Falhas: {self.failed_count}")
+            
+            # Gerar relatório
+            logger.info("📋 PASSO 7: Gerando relatório...")
+            self.generate_report()
+            
+            # Salvar no banco de dados
+            logger.info("💾 PASSO 8: Salvando no banco de dados...")
+            self.save_to_database()
+            
+            # Notificação de sucesso
+            execution_time = (datetime.datetime.now() - self.execution_start_time).total_seconds()
+            
+            if self.success_count > 0:
+                success_message = f"""✅ **Cron Job concluído (CORRIGIDO)!**
+
+📊 **Resultados:**
+• ✅ Processadas: **{self.success_count}**
+• ❌ Falhas: **{self.failed_count}**
+• 📋 Total encontradas: **{self.success_count + self.failed_count}**
+• 🗂️ Guias fechadas: **{self.closed_tabs}**
+• ⏱️ Tempo: **{execution_time/60:.2f} min**
+
+🛠️ **Correções aplicadas:**
+• Processamento dinâmico (sem índices fixos)
+• Sempre processa primeira linha disponível
+• Elimina erro "Linha não encontrada"
+• Detecção inteligente de novelties
+
+🔧 **Detalhes:**
+• 📄 Paginação: {'✅ Sim' if self.found_pagination else '❌ Não'}
+• 📸 Screenshots: {len(os.listdir('screenshots')) if os.path.exists('screenshots') else 0}
+• 🔄 **Próxima execução:** em 6 horas"""
+            else:
+                success_message = f"""⚠️ **Cron Job finalizado sem processamentos**
+
+📊 **Estatísticas:**
+• 📋 Novelties encontradas: **{self.success_count + self.failed_count}**
+• ✅ Processadas: **{self.success_count}**
+• ❌ Falhas: **{self.failed_count}**
+• ⏱️ Tempo: **{execution_time/60:.2f} min**
+
+❓ **Possíveis causas:**
+• Todas já processadas anteriormente
+• Erro na detecção dos botões Save
+• Mudança na estrutura do site
+
+🔄 **Próxima verificação:** em 6 horas"""
+
+            if self.failed_count > 0:
+                success_message += f"\n\n⚠️ **Falhas encontradas:**"
+                for i, item in enumerate(self.failed_items[:3]):  # Mostra apenas as primeiras 3
+                    success_message += f"\n• {item['id']}: {item['error'][:50]}..."
+                
+                if len(self.failed_items) > 3:
+                    success_message += f"\n• ... e mais {len(self.failed_items) - 3} falhas"
+            
+            # Determina se é erro baseado nos resultados
+            is_error = (self.success_count == 0 and (self.success_count + self.failed_count) > 0) or (self.failed_count > self.success_count)
+            self.send_discord_notification(success_message, is_error=is_error)
+            
+            logger.info("=" * 50)
+            logger.info("🎯 AUTOMAÇÃO CRON JOB CORRIGIDA CONCLUÍDA")
+            logger.info("=" * 50)
+            
+        except Exception as e:
+            logger.error(f"❌ ERRO CRÍTICO na automação: {str(e)}")
+            logger.error(f"Traceback completo: {traceback.format_exc()}")
+            
+            # Captura screenshot de erro se possível
+            try:
+                if self.driver:
+                    error_screenshot = os.path.join(self.create_screenshots_folder(), "error.png")
+                    self.driver.save_screenshot(error_screenshot)
+                    logger.info(f"📸 Screenshot de erro salvo: {error_screenshot}")
+            except:
+                pass
+            
+            # Notificação de erro detalhada
+            execution_time = (datetime.datetime.now() - self.execution_start_time).total_seconds() if self.execution_start_time else 0
+            
+            error_message = f"""❌ **ERRO CRÍTICO no Cron Job (CORRIGIDO)!**
+
+🚨 **Erro:** {str(e)[:300]}
+
+📊 **Progresso até o erro:**
+• ✅ Processadas: {self.success_count}
+• ❌ Falhas: {self.failed_count}
+• 📋 Encontradas: {self.success_count + self.failed_count}
+• ⏱️ Tempo até falha: {execution_time/60:.2f} min
+
+🔧 **Para debug:**
+• Verificar logs completos no Railway
+• Verificar screenshots salvos
+• Testar acesso manual ao Dropi
+
+🔄 **Próxima tentativa:** em 6 horas"""
+
+            self.send_discord_notification(error_message, is_error=True)
+            
+        finally:
+            # Fecha o navegador
+            if self.driver:
+                try:
+                    logger.info("🔒 Fechando navegador...")
+                    self.driver.quit()
+                    logger.info("✅ Navegador fechado com sucesso")
+                except Exception as e:
+                    logger.warning(f"⚠️ Erro ao fechar navegador: {str(e)}")
+            
+            # IMPORTANTE: Termina o processo para permitir próxima execução
+            logger.info("🏁 Terminando processo...")
+            sys.exit(0)
+
     def generate_report(self):
         """Gera relatório da execução"""
         report = {
@@ -1415,7 +1346,7 @@ class DroplAutomationBot:
 def main():
     """Função principal - EXECUÇÃO ÚNICA PARA CRON"""
     logger.info("=" * 60)
-    logger.info("🚀 INICIANDO DROPI CHILE CRON JOB")
+    logger.info("🚀 INICIANDO DROPI CHILE CRON JOB (VERSÃO CORRIGIDA)")
     logger.info("=" * 60)
     logger.info(f"🌍 Ambiente: {'Railway' if is_railway() else 'Local'}")
     logger.info(f"📅 Data/Hora: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -1429,7 +1360,7 @@ def main():
     
     try:
         # Executa automação UMA VEZ e termina
-        logger.info("🎯 Executando automação única (Cron Job)...")
+        logger.info("🎯 Executando automação única (Cron Job) - VERSÃO CORRIGIDA...")
         
         bot = DroplAutomationBot()
         bot.run_automation()
@@ -1445,7 +1376,7 @@ def main():
         sys.exit(1)
     finally:
         logger.info("=" * 60)
-        logger.info("🏁 DROPI CHILE CRON JOB FINALIZADO")
+        logger.info("🏁 DROPI CHILE CRON JOB FINALIZADO (VERSÃO CORRIGIDA)")
         logger.info("🔄 Próxima execução: automática via Railway Cron")
         logger.info("=" * 60)
         sys.exit(0)
